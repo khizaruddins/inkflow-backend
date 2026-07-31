@@ -1,0 +1,243 @@
+datasource db {
+  provider = "mongodb"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// ------------------------------------------------------
+// ENUMS
+// ------------------------------------------------------
+enum Role {
+  ADMIN
+  WRITER
+  READER
+}
+
+enum PostStatus {
+  DRAFT
+  PUBLISHED
+  SCHEDULED
+  ARCHIVED
+}
+
+enum PostVisibility {
+  PUBLIC
+  PRIVATE
+  MEMBERS_ONLY
+}
+
+enum ReportStatus {
+  UNDER_EVALUATION
+  DELETED
+  DISMISSED
+}
+
+enum NotificationType {
+  CLAP
+  RESPONSE
+  REPLY
+  FOLLOW
+}
+
+// ------------------------------------------------------
+// MODELS
+// ------------------------------------------------------
+
+model User {
+  id                   String           @id @default(auto()) @map("_id") @db.ObjectId
+  email                String           @unique
+  name                 String
+  username             String           @unique
+  avatar               String
+  bio                  String?
+  role                 Role             @default(READER)
+  masterPrivatePassword String?          // Encrypted password set by user for private stories
+  
+  followersCount       Int              @default(0)
+  followingCount       Int              @default(0)
+  followingUserIds     String[]         @default([]) @db.ObjectId
+  
+  posts                Post[]           @relation("AuthorPosts")
+  comments             Comment[]        @relation("UserComments")
+  readingLists         ReadingList[]
+  bookmarks            Bookmark[]
+  highlights           Highlight[]
+  history              ReadingHistory[]
+  notifications        Notification[]   @relation("UserNotifications")
+  reports              Report[]         @relation("Reporter")
+
+  createdAt            DateTime         @default(now())
+  updatedAt            DateTime         @updatedAt
+}
+
+model Category {
+  id          String   @id @default(auto()) @map("_id") @db.ObjectId
+  name        String
+  slug        String   @unique
+  description String?
+  color       String?
+  posts       Post[]
+  createdAt   DateTime @default(now())
+}
+
+model Tag {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  name      String
+  slug      String   @unique
+  postIds   String[] @db.ObjectId
+  posts     Post[]   @relation(fields: [postIds], references: [id])
+  createdAt DateTime @default(now())
+}
+
+model Post {
+  id                 String           @id @default(auto()) @map("_id") @db.ObjectId
+  title              String
+  subtitle           String?
+  slug               String           @unique
+  excerpt            String
+  content            String           // HTML / TipTap Content
+  coverImage         String
+
+  authorId           String           @db.ObjectId
+  author             User             @relation("AuthorPosts", fields: [authorId], references: [id])
+
+  categoryId         String           @db.ObjectId
+  category           Category         @relation(fields: [categoryId], references: [id])
+
+  tagIds             String[]         @db.ObjectId
+  tags               Tag[]            @relation(fields: [tagIds], references: [id])
+
+  status             PostStatus       @default(DRAFT)
+  visibility         PostVisibility   @default(PUBLIC)
+  secretPasswordHash String?          // For private encrypted story gates
+
+  readingTimeMinutes Int              @default(3)
+  wordCount          Int              @default(0)
+  characterCount     Int              @default(0)
+  clapsCount         Int              @default(0)
+  viewsCount         Int              @default(0)
+  sharesCount        Int              @default(0)
+  commentsCount      Int              @default(0)
+
+  isFeatured         Boolean          @default(false)
+  isPinned           Boolean          @default(false)
+  toc                Json?            // Table of contents structure
+  seo                Json?            // Meta title, description, keywords, ogImage
+
+  versions           PostVersion[]
+  comments           Comment[]
+  bookmarks          Bookmark[]
+  highlights         Highlight[]
+  history            ReadingHistory[]
+
+  publishedAt        DateTime?
+  scheduledAt        DateTime?
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
+}
+
+model PostVersion {
+  id         String   @id @default(auto()) @map("_id") @db.ObjectId
+  postId     String   @db.ObjectId
+  post       Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
+  title      String
+  content    String
+  authorName String
+  savedAt    DateTime @default(now())
+}
+
+model Comment {
+  id         String    @id @default(auto()) @map("_id") @db.ObjectId
+  postId     String    @db.ObjectId
+  post       Post      @relation(fields: [postId], references: [id], onDelete: Cascade)
+  
+  authorId   String    @db.ObjectId
+  author     User      @relation("UserComments", fields: [authorId], references: [id])
+
+  content    String    // HTML / Rich Text with links, bold, italic
+  clapsCount Int       @default(0)
+
+  parentId   String?   @db.ObjectId
+  parent     Comment?  @relation("CommentReplies", fields: [parentId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  replies    Comment[] @relation("CommentReplies")
+
+  reports    Report[]
+
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+}
+
+model ReadingList {
+  id          String   @id @default(auto()) @map("_id") @db.ObjectId
+  userId      String   @db.ObjectId
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  name        String
+  description String?
+  isPrivate   Boolean  @default(true)
+  postIds     String[] @db.ObjectId
+  notes       Json?    // Key-value pairs: { [postId]: "custom reader note" }
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model Bookmark {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  userId    String   @db.ObjectId
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  postId    String   @db.ObjectId
+  post      Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([userId, postId])
+}
+
+model Highlight {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  userId    String   @db.ObjectId
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  postId    String   @db.ObjectId
+  post      Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
+
+  text      String   // Highlighted quote text
+  createdAt DateTime @default(now())
+}
+
+model ReadingHistory {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  userId    String   @db.ObjectId
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  postId    String   @db.ObjectId
+  post      Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
+  viewedAt  DateTime @default(now())
+}
+
+model Report {
+  id            String       @id @default(auto()) @map("_id") @db.ObjectId
+  commentId     String       @db.ObjectId
+  comment       Comment      @relation(fields: [commentId], references: [id], onDelete: Cascade)
+  
+  reporterId    String       @db.ObjectId
+  reporter      User         @relation("Reporter", fields: [reporterId], references: [id])
+
+  reasons       String[]     // ["Harassment", "Spam", "Rules Violation", "AI-generated"]
+  blockedAuthor Boolean      @default(false)
+  status        ReportStatus @default(UNDER_EVALUATION)
+  createdAt     DateTime     @default(now())
+}
+
+model Notification {
+  id          String           @id @default(auto()) @map("_id") @db.ObjectId
+  recipientId String           @db.ObjectId
+  recipient   User             @relation("UserNotifications", fields: [recipientId], references: [id], onDelete: Cascade)
+
+  type        NotificationType
+  actorId     String           @db.ObjectId
+  postId      String?          @db.ObjectId
+  read        Boolean          @default(false)
+  createdAt   DateTime         @default(now())
+}

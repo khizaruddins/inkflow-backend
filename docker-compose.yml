@@ -1,0 +1,28 @@
+version: '3.8'
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - '4000:4000'
+    environment:
+      - PORT=4000
+      - NODE_ENV=production
+      - DATABASE_URL=mongodb://mongo:27017/inkflow?replicaSet=rs0
+      - JWT_ACCESS_SECRET=inkflow_jwt_access_super_secret_key_2026
+      - JWT_REFRESH_SECRET=inkflow_jwt_refresh_super_secret_key_2026
+    depends_on:
+      - mongo
+
+  mongo:
+    image: mongo:7.0
+    ports:
+      - '27017:27017'
+    volumes:
+      - mongo_data:/data/db
+    command: ["--replSet", "rs0", "--bind_ip_all"]
+
+volumes:
+  mongo_data:
