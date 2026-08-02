@@ -1,6 +1,6 @@
-import { Controller, Post, Body, Res, Get, UseGuards } from '@nestjs/common';
+import { Controller, Post, Body, Res, Get, UseGuards, Req } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
-import { Response } from 'express';
+import { Request, Response } from 'express';
 import { AuthService } from './auth.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
@@ -32,6 +32,24 @@ export class AuthController {
   @ApiResponse({ status: 200, description: 'User successfully logged in.' })
   async login(@Body() dto: LoginDto, @Res({ passthrough: true }) res: Response) {
     const { user, tokens } = await this.authService.login(dto);
+
+    res.cookie('accessToken', tokens.accessToken, { httpOnly: true, secure: false });
+    res.cookie('refreshToken', tokens.refreshToken, { httpOnly: true, secure: false });
+
+    return { user, accessToken: tokens.accessToken };
+  }
+
+  @Public()
+  @Post('refresh')
+  @ApiOperation({ summary: 'Refresh access & refresh tokens' })
+  @ApiResponse({ status: 200, description: 'Tokens successfully refreshed.' })
+  async refresh(
+    @Req() req: Request,
+    @Body('refreshToken') refreshTokenFromBody: string,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const token = req.cookies?.refreshToken || refreshTokenFromBody;
+    const { user, tokens } = await this.authService.refreshToken(token);
 
     res.cookie('accessToken', tokens.accessToken, { httpOnly: true, secure: false });
     res.cookie('refreshToken', tokens.refreshToken, { httpOnly: true, secure: false });

@@ -1,11 +1,15 @@
 import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
 import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../../common/database/prisma.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { CreatePostDto } from './dto/create-post.dto';
 
 @Injectable()
 export class PostsService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private notificationsService: NotificationsService,
+  ) {}
 
   async findAll(query: { status?: string; categoryId?: string; authorId?: string; search?: string }) {
     const where: any = {};
@@ -94,13 +98,52 @@ export class PostsService {
     });
   }
 
-  async clap(id: string) {
+  async clap(id: string, actorId?: string) {
+    const post = await this.prisma.post.findUnique({ where: { id } });
+    if (!post) throw new NotFoundException('Post not found');
+
+    const updated = await this.prisma.post.update({
+      where: { id },
+      data: { clapsCount: { increment: 1 } },
+    });
+
+    if (actorId && post.authorId !== actorId) {
+      await this.notificationsService.createNotification({
+        recipientId: post.authorId,
+        actorId,
+        type: 'CLAP',
+        postId: id,
+      }).catch(() => null);
+    }
+
+    return updated;
+  }
+
+  async submitForReview(id: string, authorId: string) {
+    const post = await this.prisma.post.findUnique({ where: { id } });
+    if (!post) throw new NotFoundException('Post not found');
+    if (post.authorId !== authorId) throw new ForbiddenException('Only post author can submit for review');
+
+    return this.prisma.post.update({
+      where: { id },
+      data: {
+        status: 'PENDING_REVIEW',
+        reviewFeedback: null,
+      },
+    });
+  }
+
+  async reviewPost(id: string, status: 'PUBLISHED' | 'NEEDS_REVISION' | 'REJECTED', feedback?: string) {
     const post = await this.prisma.post.findUnique({ where: { id } });
     if (!post) throw new NotFoundException('Post not found');
 
     return this.prisma.post.update({
       where: { id },
-      data: { clapsCount: { increment: 1 } },
+      data: {
+        status: status as any,
+        reviewFeedback: feedback || null,
+        publishedAt: status === 'PUBLISHED' ? new Date() : post.publishedAt,
+      },
     });
   }
 

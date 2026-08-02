@@ -27,9 +27,11 @@ export class AuthService {
     }
 
     const hashedPassword = await bcrypt.hash(dto.password, 10);
-    const defaultAvatar = `https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=300&q=80`;
+    // All self-service signups start as READER role.
+    // Readers can apply to become a WRITER via Creator Application, which Admin approves.
+    const userRole = Role.READER;
 
-    const userRole = (dto.role as Role) || Role.READER;
+    const defaultAvatar = `https://ui-avatars.com/api/?name=${encodeURIComponent(dto.name)}&background=random`;
 
     const user = await this.prisma.user.create({
       data: {
@@ -85,5 +87,33 @@ export class AuthService {
     });
 
     return { accessToken, refreshToken };
+  }
+
+  async refreshToken(refreshToken: string) {
+    if (!refreshToken) {
+      throw new UnauthorizedException('Refresh token is missing.');
+    }
+
+    try {
+      const secret =
+        this.configService.get<string>('JWT_REFRESH_SECRET') ||
+        'inkflow_jwt_refresh_super_secret_key_2026';
+      const payload = await this.jwtService.verifyAsync(refreshToken, { secret });
+
+      const user = await this.prisma.user.findUnique({
+        where: { id: payload.sub },
+      });
+
+      if (!user) {
+        throw new UnauthorizedException('User not found.');
+      }
+
+      const { masterPrivatePassword, ...userWithoutPassword } = user;
+      const tokens = await this.generateTokens(user.id, user.email, user.role);
+
+      return { user: userWithoutPassword, tokens };
+    } catch (err) {
+      throw new UnauthorizedException('Invalid or expired refresh token.');
+    }
   }
 }

@@ -46,8 +46,29 @@ export class PostsController {
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Clap for a story (Authenticated readers only)' })
-  async clap(@Param('id') id: string) {
-    return this.postsService.clap(id);
+  async clap(@Param('id') id: string, @CurrentUser('id') actorId: string) {
+    return this.postsService.clap(id, actorId);
+  }
+
+  @Post(':id/submit')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Submit story for Admin editorial review (Writer only)' })
+  async submitForReview(@Param('id') id: string, @CurrentUser('id') authorId: string) {
+    return this.postsService.submitForReview(id, authorId);
+  }
+
+  @Post(':id/review')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.ADMIN)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Admin review action: Approve, Request Revisions with feedback notes, or Reject (Admin only)' })
+  async reviewPost(
+    @Param('id') id: string,
+    @Body('status') status: 'PUBLISHED' | 'NEEDS_REVISION' | 'REJECTED',
+    @Body('feedback') feedback?: string,
+  ) {
+    return this.postsService.reviewPost(id, status, feedback);
   }
 
   @Public()

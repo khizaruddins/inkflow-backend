@@ -1,11 +1,15 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../common/database/prisma.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { CreateCommentDto } from './dto/create-comment.dto';
 import { ReportCommentDto } from './dto/report-comment.dto';
 
 @Injectable()
 export class CommentsService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private notificationsService: NotificationsService,
+  ) {}
 
   async findByPostId(postId: string) {
     const isObjectId = /^[0-9a-fA-F]{24}$/.test(postId);
@@ -41,10 +45,20 @@ export class CommentsService {
     });
 
     // Update comment count on post
-    await this.prisma.post.update({
+    const post = await this.prisma.post.update({
       where: { id: dto.postId },
       data: { commentsCount: { increment: 1 } },
-    });
+    }).catch(() => null);
+
+    // Create Notification
+    if (post && post.authorId !== authorId) {
+      await this.notificationsService.createNotification({
+        recipientId: post.authorId,
+        actorId: authorId,
+        type: dto.parentId ? 'REPLY' : 'RESPONSE',
+        postId: dto.postId,
+      }).catch(() => null);
+    }
 
     return comment;
   }

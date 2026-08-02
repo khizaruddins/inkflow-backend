@@ -7,6 +7,9 @@ import { CommentsModule } from './modules/comments/comments.module';
 import { ReportsModule } from './modules/reports/reports.module';
 import { LibraryModule } from './modules/library/library.module';
 import { HealthModule } from './modules/health/health.module';
+import { AnalyticsModule } from './modules/analytics/analytics.module';
+import { ApplicationsModule } from './modules/applications/applications.module';
+import { NotificationsModule } from './modules/notifications/notifications.module';
 
 @Module({
   imports: [
@@ -21,6 +24,9 @@ import { HealthModule } from './modules/health/health.module';
     ReportsModule,
     LibraryModule,
     HealthModule,
+    AnalyticsModule,
+    ApplicationsModule,
+    NotificationsModule,
   ],
 })
 export class AppModule {}
