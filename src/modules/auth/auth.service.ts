@@ -116,4 +116,75 @@ export class AuthService {
       throw new UnauthorizedException('Invalid or expired refresh token.');
     }
   }
+
+  async getUserMe(userId: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+    });
+
+    if (!user) {
+      throw new UnauthorizedException('User not found.');
+    }
+
+    const { masterPrivatePassword, ...userWithoutPassword } = user;
+    return userWithoutPassword;
+  }
+
+  async toggleFollowUser(currentUserId: string, targetUserId: string) {
+    if (currentUserId === targetUserId) {
+      throw new ConflictException('Cannot follow yourself');
+    }
+
+    const currentUser = await this.prisma.user.findUnique({ where: { id: currentUserId } });
+    const targetUser = await this.prisma.user.findUnique({ where: { id: targetUserId } });
+
+    if (!currentUser || !targetUser) {
+      throw new UnauthorizedException('User not found');
+    }
+
+    const isFollowing = currentUser.followingUserIds.includes(targetUserId);
+
+    if (isFollowing) {
+      const updatedFollowing = currentUser.followingUserIds.filter((id) => id !== targetUserId);
+      await this.prisma.user.update({
+        where: { id: currentUserId },
+        data: {
+          followingUserIds: { set: updatedFollowing },
+          followingCount: { decrement: 1 },
+        },
+      });
+      await this.prisma.user.update({
+        where: { id: targetUserId },
+        data: { followersCount: { decrement: 1 } },
+      });
+      return { following: false, followingUserIds: updatedFollowing };
+    } else {
+      const updatedFollowing = [...currentUser.followingUserIds, targetUserId];
+      await this.prisma.user.update({
+        where: { id: currentUserId },
+        data: {
+          followingUserIds: { set: updatedFollowing },
+          followingCount: { increment: 1 },
+        },
+      });
+      await this.prisma.user.update({
+        where: { id: targetUserId },
+        data: { followersCount: { increment: 1 } },
+      });
+
+      try {
+        await this.prisma.notification.create({
+          data: {
+            recipientId: targetUserId,
+            actorId: currentUserId,
+            type: 'FOLLOW',
+          },
+        });
+      } catch (e) {
+        // Quietly handle notification error if duplicate
+      }
+
+      return { following: true, followingUserIds: updatedFollowing };
+    }
+  }
 }

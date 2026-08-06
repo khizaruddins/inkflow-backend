@@ -33,10 +33,10 @@ export class CreatePostDto {
   @IsNotEmpty()
   coverImage: string;
 
-  @ApiProperty({ example: '60d5ec49f1b2c80015f8a001', description: 'Category ObjectId' })
+  @ApiProperty({ example: '60d5ec49f1b2c80015f8a001', required: false, description: 'Category ObjectId' })
+  @IsOptional()
   @IsString()
-  @IsNotEmpty()
-  categoryId: string;
+  categoryId?: string;
 
   @ApiProperty({ example: ['60d5ec49f1b2c80015f8a002'], required: false })
   @IsOptional()

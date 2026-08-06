@@ -1,4 +1,4 @@
-import { Controller, Post, Body, Res, Get, UseGuards, Req } from '@nestjs/common';
+import { Controller, Post, Body, Res, Get, UseGuards, Req, Param } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import { Request, Response } from 'express';
 import { AuthService } from './auth.service';
@@ -13,17 +13,25 @@ import { JwtAuthGuard } from './guards/jwt-auth.guard';
 export class AuthController {
   constructor(private authService: AuthService) {}
 
+  private setAuthCookies(res: Response, accessToken: string, refreshToken: string) {
+    const cookieOptions = {
+      httpOnly: true,
+      secure: false,
+      sameSite: 'lax' as const,
+      path: '/',
+    };
+    res.cookie('accessToken', accessToken, cookieOptions);
+    res.cookie('refreshToken', refreshToken, cookieOptions);
+  }
+
   @Public()
   @Post('register')
   @ApiOperation({ summary: 'Register a new user account' })
   @ApiResponse({ status: 201, description: 'User successfully registered.' })
   async register(@Body() dto: RegisterDto, @Res({ passthrough: true }) res: Response) {
     const { user, tokens } = await this.authService.register(dto);
-
-    res.cookie('accessToken', tokens.accessToken, { httpOnly: true, secure: false });
-    res.cookie('refreshToken', tokens.refreshToken, { httpOnly: true, secure: false });
-
-    return { user, accessToken: tokens.accessToken };
+    this.setAuthCookies(res, tokens.accessToken, tokens.refreshToken);
+    return { user };
   }
 
   @Public()
@@ -32,11 +40,8 @@ export class AuthController {
   @ApiResponse({ status: 200, description: 'User successfully logged in.' })
   async login(@Body() dto: LoginDto, @Res({ passthrough: true }) res: Response) {
     const { user, tokens } = await this.authService.login(dto);
-
-    res.cookie('accessToken', tokens.accessToken, { httpOnly: true, secure: false });
-    res.cookie('refreshToken', tokens.refreshToken, { httpOnly: true, secure: false });
-
-    return { user, accessToken: tokens.accessToken };
+    this.setAuthCookies(res, tokens.accessToken, tokens.refreshToken);
+    return { user };
   }
 
   @Public()
@@ -50,11 +55,8 @@ export class AuthController {
   ) {
     const token = req.cookies?.refreshToken || refreshTokenFromBody;
     const { user, tokens } = await this.authService.refreshToken(token);
-
-    res.cookie('accessToken', tokens.accessToken, { httpOnly: true, secure: false });
-    res.cookie('refreshToken', tokens.refreshToken, { httpOnly: true, secure: false });
-
-    return { user, accessToken: tokens.accessToken };
+    this.setAuthCookies(res, tokens.accessToken, tokens.refreshToken);
+    return { user };
   }
 
   @Post('logout')
@@ -62,16 +64,27 @@ export class AuthController {
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Logout user & clear httpOnly cookies' })
   async logout(@Res({ passthrough: true }) res: Response) {
-    res.clearCookie('accessToken');
-    res.clearCookie('refreshToken');
+    res.clearCookie('accessToken', { path: '/' });
+    res.clearCookie('refreshToken', { path: '/' });
     return { message: 'Logged out successfully' };
   }
 
   @Get('me')
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Get current authenticated user payload' })
-  async getCurrentUser(@CurrentUser() user: any) {
-    return user;
+  @ApiOperation({ summary: 'Get current authenticated user full profile' })
+  async me(@CurrentUser('id') userId: string) {
+    return this.authService.getUserMe(userId);
+  }
+
+  @Post('users/:targetUserId/follow')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Toggle follow status for a user' })
+  async toggleFollow(
+    @CurrentUser('id') currentUserId: string,
+    @Param('targetUserId') targetUserId: string,
+  ) {
+    return this.authService.toggleFollowUser(currentUserId, targetUserId);
   }
 }

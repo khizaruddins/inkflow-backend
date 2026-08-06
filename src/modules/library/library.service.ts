@@ -91,4 +91,36 @@ export class LibraryService {
       orderBy: { viewedAt: 'desc' },
     });
   }
+
+  async recordHistory(userId: string, postId: string) {
+    if (!userId || !postId) return null;
+
+    try {
+      await this.prisma.post.update({
+        where: { id: postId },
+        data: { viewsCount: { increment: 1 } },
+      });
+    } catch (e) {
+      // Ignore error if post ID doesn't match objectid
+    }
+
+    const existing = await this.prisma.readingHistory.findFirst({
+      where: { userId, postId },
+    });
+
+    if (existing) {
+      return this.prisma.readingHistory.update({
+        where: { id: existing.id },
+        data: { viewedAt: new Date() },
+      });
+    }
+
+    return this.prisma.readingHistory.create({
+      data: {
+        userId,
+        postId,
+        viewedAt: new Date(),
+      },
+    });
+  }
 }
