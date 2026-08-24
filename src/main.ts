@@ -34,9 +34,45 @@ export async function bootstrap(): Promise<INestApplication> {
   nestApp.use(cookieParser());
 
   // CORS Configuration
+  const rawOrigins = process.env.ALLOWED_ORIGINS;
+  const explicitOrigins = rawOrigins
+    ? rawOrigins.split(',').map((o) => o.trim()).filter(Boolean)
+    : ['http://localhost:3000', 'http://localhost:4000'];
+
   nestApp.enableCors({
-    origin: process.env.ALLOWED_ORIGINS?.split(',') || ['http://localhost:3000'],
+    origin: (origin, callback) => {
+      // Allow requests with no origin (e.g. mobile apps, curl, server-to-server)
+      if (!origin) {
+        return callback(null, true);
+      }
+      // Allow wildcard, configured origins, localhost, or any *.vercel.app domain
+      if (
+        rawOrigins === '*' ||
+        explicitOrigins.includes(origin) ||
+        origin.endsWith('.vercel.app') ||
+        origin.includes('localhost')
+      ) {
+        return callback(null, true);
+      }
+      return callback(new Error(`Origin ${origin} not allowed by CORS`), false);
+    },
     credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS', 'HEAD'],
+    allowedHeaders: [
+      'Origin',
+      'X-Requested-With',
+      'Content-Type',
+      'Accept',
+      'Authorization',
+      'Cookie',
+      'sec-ch-ua',
+      'sec-ch-ua-mobile',
+      'sec-ch-ua-platform',
+      'DNT',
+      'Referer',
+      'User-Agent',
+    ],
+    exposedHeaders: ['Set-Cookie'],
   });
 
   // Global Prefix
