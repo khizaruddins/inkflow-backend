@@ -14,14 +14,24 @@ export class AuthController {
   constructor(private authService: AuthService) {}
 
   private setAuthCookies(res: Response, accessToken: string, refreshToken: string) {
-    const cookieOptions = {
+    const isProduction = process.env.NODE_ENV === 'production';
+    const sameSiteMode: 'none' | 'lax' = isProduction ? 'none' : 'lax';
+    const accessCookieOptions = {
       httpOnly: true,
-      secure: false,
-      sameSite: 'lax' as const,
+      secure: isProduction,
+      sameSite: sameSiteMode,
       path: '/',
+      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
     };
-    res.cookie('accessToken', accessToken, cookieOptions);
-    res.cookie('refreshToken', refreshToken, cookieOptions);
+    const refreshCookieOptions = {
+      httpOnly: true,
+      secure: isProduction,
+      sameSite: sameSiteMode,
+      path: '/',
+      maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
+    };
+    res.cookie('accessToken', accessToken, accessCookieOptions);
+    res.cookie('refreshToken', refreshToken, refreshCookieOptions);
   }
 
   @Public()
@@ -31,7 +41,7 @@ export class AuthController {
   async register(@Body() dto: RegisterDto, @Res({ passthrough: true }) res: Response) {
     const { user, tokens } = await this.authService.register(dto);
     this.setAuthCookies(res, tokens.accessToken, tokens.refreshToken);
-    return { user };
+    return { user, tokens };
   }
 
   @Public()
@@ -41,7 +51,15 @@ export class AuthController {
   async login(@Body() dto: LoginDto, @Res({ passthrough: true }) res: Response) {
     const { user, tokens } = await this.authService.login(dto);
     this.setAuthCookies(res, tokens.accessToken, tokens.refreshToken);
-    return { user };
+    return { user, tokens };
+  }
+
+  @Public()
+  @Post('reset-password')
+  @ApiOperation({ summary: 'Reset password for user account' })
+  @ApiResponse({ status: 200, description: 'Password reset successfully.' })
+  async resetPassword(@Body() body: { email: string; newPassword: string }) {
+    return this.authService.resetPassword(body);
   }
 
   @Public()
@@ -54,9 +72,9 @@ export class AuthController {
     @Res({ passthrough: true }) res: Response,
   ) {
     const token = req.cookies?.refreshToken || refreshTokenFromBody;
-    const { user, tokens } = await this.authService.refreshToken(token);
+    const { user, tokens } = await this.authService.refreshTokens(token);
     this.setAuthCookies(res, tokens.accessToken, tokens.refreshToken);
-    return { user };
+    return { user, tokens };
   }
 
   @Post('logout')
@@ -75,6 +93,27 @@ export class AuthController {
   @ApiOperation({ summary: 'Get current authenticated user full profile' })
   async me(@CurrentUser('id') userId: string) {
     return this.authService.getUserMe(userId);
+  }
+
+  @Public()
+  @Get('users/by-username/:username')
+  @ApiOperation({ summary: 'Get public user profile & publications by username' })
+  async getUserByUsername(@Param('username') username: string) {
+    return this.authService.getUserByUsername(username);
+  }
+
+  @Public()
+  @Get('users/:idOrUsername/followers')
+  @ApiOperation({ summary: 'Get followers list for a user' })
+  async getUserFollowers(@Param('idOrUsername') idOrUsername: string) {
+    return this.authService.getUserFollowers(idOrUsername);
+  }
+
+  @Public()
+  @Get('users/:idOrUsername/following')
+  @ApiOperation({ summary: 'Get following list for a user' })
+  async getUserFollowing(@Param('idOrUsername') idOrUsername: string) {
+    return this.authService.getUserFollowing(idOrUsername);
   }
 
   @Post('users/:targetUserId/follow')

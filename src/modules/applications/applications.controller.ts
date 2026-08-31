@@ -19,6 +19,13 @@ export class ApplicationsController {
     return this.applicationsService.create(req.user.id || req.user.sub, dto);
   }
 
+  @Get('my-status')
+  @ApiOperation({ summary: 'Get current user creator application status' })
+  async getMyStatus(@Request() req: any) {
+    const userId = req.user.id || req.user.sub;
+    return this.applicationsService.findByUserId(userId);
+  }
+
   @Get()
   @Roles(Role.ADMIN)
   @ApiOperation({ summary: 'List all creator applications (Admin only)' })

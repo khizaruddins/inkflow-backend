@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, Param, Query, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Delete, Body, Param, Query, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import { Role } from '@prisma/client';
 import { PostsService } from './posts.service';
@@ -38,13 +38,6 @@ export class PostsController {
     });
   }
 
-  @Public()
-  @Get(':slugOrId')
-  @ApiOperation({ summary: 'Fetch single story details by slug or ObjectId' })
-  async findOne(@Param('slugOrId') slugOrId: string) {
-    return this.postsService.findBySlugOrId(slugOrId);
-  }
-
   @Post('draft')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.ADMIN, Role.WRITER)
@@ -52,6 +45,32 @@ export class PostsController {
   @ApiOperation({ summary: 'Save story content as a draft (Writer / Admin only)' })
   async saveDraft(@CurrentUser('id') authorId: string, @Body() dto: SaveDraftDto) {
     return this.postsService.saveDraft(authorId, dto);
+  }
+
+  @Post('bulk-delete')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.ADMIN, Role.WRITER)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Bulk delete posts by IDs (Writer / Admin only)' })
+  async bulkDelete(
+    @Body('ids') ids: string[],
+    @CurrentUser('id') currentUserId: string,
+    @CurrentUser('role') userRole: string,
+  ) {
+    return this.postsService.bulkDelete(ids, currentUserId, userRole);
+  }
+
+  @Post('bulk-publish')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.ADMIN, Role.WRITER)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Bulk publish posts by IDs (Writer / Admin only)' })
+  async bulkPublish(
+    @Body('ids') ids: string[],
+    @CurrentUser('id') currentUserId: string,
+    @CurrentUser('role') userRole: string,
+  ) {
+    return this.postsService.bulkPublish(ids, currentUserId, userRole);
   }
 
   @Post()
@@ -63,6 +82,19 @@ export class PostsController {
     return this.postsService.create(authorId, dto);
   }
 
+  @Delete(':id')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.ADMIN, Role.WRITER)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Delete a single post by ID (Writer / Admin only)' })
+  async deletePost(
+    @Param('id') id: string,
+    @CurrentUser('id') currentUserId: string,
+    @CurrentUser('role') userRole: string,
+  ) {
+    return this.postsService.deletePost(id, currentUserId, userRole);
+  }
+
   @Post(':id/feature')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.ADMIN)
@@ -70,6 +102,13 @@ export class PostsController {
   @ApiOperation({ summary: 'Toggle post isFeatured status (Admin only)' })
   async toggleFeature(@Param('id') id: string) {
     return this.postsService.toggleFeature(id);
+  }
+
+  @Public()
+  @Get(':slugOrId')
+  @ApiOperation({ summary: 'Fetch single story details by slug or ObjectId' })
+  async findOne(@Param('slugOrId') slugOrId: string) {
+    return this.postsService.findBySlugOrId(slugOrId);
   }
 
   @Post(':id')

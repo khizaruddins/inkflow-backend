@@ -42,6 +42,23 @@ export class ApplicationsService {
     });
   }
 
+  async findByUserId(userId: string) {
+    return this.prisma.creatorApplication.findFirst({
+      where: { userId },
+      orderBy: { createdAt: 'desc' },
+      include: {
+        user: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+            role: true,
+          },
+        },
+      },
+    });
+  }
+
   async findAll() {
     return this.prisma.creatorApplication.findMany({
       orderBy: { createdAt: 'desc' },
@@ -83,6 +100,16 @@ export class ApplicationsService {
         where: { id: app.userId },
         data: { role: 'WRITER' },
       });
+
+      try {
+        await this.prisma.notification.create({
+          data: {
+            recipientId: app.userId,
+            actorId: app.userId,
+            type: 'FOLLOW',
+          },
+        });
+      } catch {}
     }
 
     return updatedApp;

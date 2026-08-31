@@ -1,5 +1,6 @@
 import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
 import * as bcrypt from 'bcrypt';
+import { Role, PostStatus } from '@prisma/client';
 import { PrismaService } from '../../common/database/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { CreatePostDto } from './dto/create-post.dto';
@@ -378,5 +379,106 @@ export class PostsService {
         readingTimeMinutes,
       },
     });
+  }
+
+  private async cleanupPostDependencies(postIds: string[]) {
+    if (!postIds || postIds.length === 0) return;
+
+    try {
+      // 1. Find all comments for these posts
+      const comments = await this.prisma.comment.findMany({
+        where: { postId: { in: postIds } },
+        select: { id: true },
+      });
+      const commentIds = comments.map((c) => c.id);
+
+      // 2. Delete reports on those comments
+      if (commentIds.length > 0) {
+        await this.prisma.report.deleteMany({
+          where: { commentId: { in: commentIds } },
+        });
+      }
+
+      // 3. Delete child comment replies first to satisfy self-referential CommentReplies
+      await this.prisma.comment.deleteMany({
+        where: { postId: { in: postIds }, parentId: { not: null } },
+      });
+
+      // 4. Delete remaining root comments
+      await this.prisma.comment.deleteMany({
+        where: { postId: { in: postIds } },
+      });
+
+      // 5. Delete post versions, bookmarks, highlights, history, claps, notifications
+      await Promise.allSettled([
+        this.prisma.postVersion.deleteMany({ where: { postId: { in: postIds } } }),
+        this.prisma.bookmark.deleteMany({ where: { postId: { in: postIds } } }),
+        this.prisma.highlight.deleteMany({ where: { postId: { in: postIds } } }),
+        this.prisma.readingHistory.deleteMany({ where: { postId: { in: postIds } } }),
+        this.prisma.postClap.deleteMany({ where: { postId: { in: postIds } } }),
+        this.prisma.notification.deleteMany({ where: { postId: { in: postIds } } }),
+      ]);
+    } catch (err) {
+      console.error('Error cleaning up post dependencies:', err);
+    }
+  }
+
+  async bulkDelete(ids: string[], currentUserId?: string, userRole?: string) {
+    if (!ids || ids.length === 0) return { count: 0 };
+    const where: any = {
+      id: { in: ids },
+    };
+    if (userRole !== Role.ADMIN && currentUserId) {
+      where.authorId = currentUserId;
+    }
+
+    const postsToDelete = await this.prisma.post.findMany({
+      where,
+      select: { id: true },
+    });
+    const targetIds = postsToDelete.map((p) => p.id);
+    if (targetIds.length === 0) return { count: 0 };
+
+    await this.cleanupPostDependencies(targetIds);
+
+    return this.prisma.post.deleteMany({
+      where: { id: { in: targetIds } },
+    });
+  }
+
+  async bulkPublish(ids: string[], currentUserId?: string, userRole?: string) {
+    if (!ids || ids.length === 0) return { count: 0 };
+    const where: any = {
+      id: { in: ids },
+    };
+    if (userRole !== Role.ADMIN && currentUserId) {
+      where.authorId = currentUserId;
+    }
+    return this.prisma.post.updateMany({
+      where,
+      data: {
+        status: PostStatus.PUBLISHED,
+        publishedAt: new Date(),
+      },
+    });
+  }
+
+  async deletePost(id: string, authorId: string, userRole?: string) {
+    const existing = await this.prisma.post.findUnique({
+      where: { id },
+    });
+    if (!existing) {
+      throw new NotFoundException('Story not found.');
+    }
+    if (userRole !== Role.ADMIN && existing.authorId !== authorId) {
+      throw new ForbiddenException('You do not have permission to delete this story.');
+    }
+
+    await this.cleanupPostDependencies([id]);
+
+    await this.prisma.post.delete({
+      where: { id },
+    });
+    return { success: true, message: 'Story deleted successfully.' };
   }
 }
