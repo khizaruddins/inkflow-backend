@@ -230,6 +230,8 @@ model Highlight {
   post      Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
 
   text      String   // Highlighted quote text
+  title     String?  // Optional name / label for note
+  note      String?  // Optional description / thoughts
   createdAt DateTime @default(now())
 }
 

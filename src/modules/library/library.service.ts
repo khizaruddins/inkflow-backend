@@ -61,15 +61,32 @@ export class LibraryService {
     return this.prisma.highlight.findMany({
       where: { userId },
       include: {
-        post: { select: { id: true, title: true, slug: true } },
+        post: {
+          select: {
+            id: true,
+            title: true,
+            slug: true,
+            coverImage: true,
+            author: { select: { id: true, name: true, avatar: true } },
+          },
+        },
       },
       orderBy: { createdAt: 'desc' },
     });
   }
 
-  async createHighlight(userId: string, postId: string, text: string) {
+  async createHighlight(userId: string, postId: string, text: string, title?: string, note?: string) {
     return this.prisma.highlight.create({
-      data: { userId, postId, text },
+      data: { userId, postId, text, title, note },
+      include: {
+        post: {
+          select: {
+            id: true,
+            title: true,
+            slug: true,
+          },
+        },
+      },
     });
   }
 

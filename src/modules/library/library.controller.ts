@@ -52,8 +52,10 @@ export class LibraryController {
     @CurrentUser('id') userId: string,
     @Body('postId') postId: string,
     @Body('text') text: string,
+    @Body('title') title?: string,
+    @Body('note') note?: string,
   ) {
-    return this.libraryService.createHighlight(userId, postId, text);
+    return this.libraryService.createHighlight(userId, postId, text, title, note);
   }
 
   @Delete('highlights/:id')

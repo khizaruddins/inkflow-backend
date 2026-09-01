@@ -25,7 +25,9 @@ export class PostsService {
     const where: any = {};
 
     if (query.status) {
-      where.status = query.status.toUpperCase();
+      if (query.status.toUpperCase() !== 'ALL') {
+        where.status = query.status.toUpperCase();
+      }
     } else {
       where.status = 'PUBLISHED';
     }
