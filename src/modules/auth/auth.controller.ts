@@ -77,11 +77,20 @@ export class AuthController {
     return { user, tokens };
   }
 
+  @Public()
   @Post('logout')
-  @UseGuards(JwtAuthGuard)
-  @ApiBearerAuth()
   @ApiOperation({ summary: 'Logout user & clear httpOnly cookies' })
   async logout(@Res({ passthrough: true }) res: Response) {
+    const isProduction = process.env.NODE_ENV === 'production';
+    const sameSiteMode: 'none' | 'lax' = isProduction ? 'none' : 'lax';
+    const cookieOptions = {
+      httpOnly: true,
+      secure: isProduction,
+      sameSite: sameSiteMode,
+      path: '/',
+    };
+    res.clearCookie('accessToken', cookieOptions);
+    res.clearCookie('refreshToken', cookieOptions);
     res.clearCookie('accessToken', { path: '/' });
     res.clearCookie('refreshToken', { path: '/' });
     return { message: 'Logged out successfully' };

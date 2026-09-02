@@ -11,6 +11,7 @@ import { AnalyticsModule } from './modules/analytics/analytics.module';
 import { ApplicationsModule } from './modules/applications/applications.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
 import { CategoriesModule } from './modules/categories/categories.module';
+import { UnsplashModule } from './modules/unsplash/unsplash.module';
 
 @Module({
   imports: [
@@ -29,6 +30,7 @@ import { CategoriesModule } from './modules/categories/categories.module';
     ApplicationsModule,
     NotificationsModule,
     CategoriesModule,
+    UnsplashModule,
   ],
 })
 export class AppModule {}
