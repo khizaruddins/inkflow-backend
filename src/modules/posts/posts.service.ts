@@ -166,11 +166,21 @@ export class PostsService {
       coverImage = firstImage || coverImage || DEFAULT_COVER_IMAGE;
     }
 
+    // Resolve slug and ensure uniqueness
+    let slug = dto.slug
+      ? dto.slug.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')
+      : dto.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+    if (!slug) slug = `story-${Date.now().toString().slice(-6)}`;
+    const slugCollision = await this.prisma.post.findFirst({ where: { slug } });
+    if (slugCollision) {
+      slug = `${slug}-${Date.now().toString().slice(-4)}`;
+    }
+
     return this.prisma.post.create({
       data: {
         title: dto.title,
         subtitle: dto.subtitle,
-        slug: dto.slug,
+        slug,
         excerpt: dto.excerpt,
         content: dto.content,
         coverImage,
@@ -236,12 +246,24 @@ export class PostsService {
       coverImage = firstImage;
     }
 
+    // Resolve slug and avoid collisions with other posts
+    let slug = existing.slug;
+    if (dto.slug && dto.slug !== existing.slug) {
+      const slugCandidate = dto.slug.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+      if (slugCandidate) {
+        const slugCollision = await this.prisma.post.findFirst({
+          where: { slug: slugCandidate, id: { not: id } },
+        });
+        slug = slugCollision ? `${slugCandidate}-${Date.now().toString().slice(-4)}` : slugCandidate;
+      }
+    }
+
     return this.prisma.post.update({
       where: { id },
       data: {
         title: dto.title || existing.title,
         subtitle: dto.subtitle ?? existing.subtitle,
-        slug: dto.slug || existing.slug,
+        slug,
         excerpt: dto.excerpt || existing.excerpt,
         content,
         coverImage,
@@ -416,7 +438,7 @@ export class PostsService {
             coverImage: finalCover,
             categoryId,
             tagIds: dto.tagIds || existing.tagIds,
-            status: 'DRAFT',
+            status: existing.status || 'DRAFT',
             wordCount,
             readingTimeMinutes,
           },
