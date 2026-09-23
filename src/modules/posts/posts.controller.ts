@@ -79,6 +79,9 @@ export class PostsController {
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Create & publish a new blog post (Writer / Admin only)' })
   async create(@CurrentUser('id') authorId: string, @Body() dto: CreatePostDto) {
+    if (dto.id) {
+      return this.postsService.updatePost(dto.id, authorId, dto);
+    }
     return this.postsService.create(authorId, dto);
   }
 

@@ -3,6 +3,11 @@ import { IsNotEmpty, IsOptional, IsString, IsEnum, IsBoolean, IsArray } from 'cl
 import { PostStatus, PostVisibility } from '@prisma/client';
 
 export class CreatePostDto {
+  @ApiProperty({ example: '6ab3a11eb05a5f9f06ac41ff', required: false, description: 'Post ID if updating an existing post or draft' })
+  @IsOptional()
+  @IsString()
+  id?: string;
+
   @ApiProperty({ example: 'Building Next-Generation React 19 Frontend Architectures' })
   @IsString()
   @IsNotEmpty()
@@ -28,10 +33,10 @@ export class CreatePostDto {
   @IsNotEmpty()
   content: string;
 
-  @ApiProperty({ example: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe' })
+  @ApiProperty({ example: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe', required: false })
+  @IsOptional()
   @IsString()
-  @IsNotEmpty()
-  coverImage: string;
+  coverImage?: string;
 
   @ApiProperty({ example: '60d5ec49f1b2c80015f8a001', required: false, description: 'Category ObjectId' })
   @IsOptional()
