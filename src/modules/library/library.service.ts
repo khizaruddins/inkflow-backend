@@ -109,16 +109,20 @@ export class LibraryService {
     });
   }
 
-  async recordHistory(userId: string, postId: string) {
+  async recordHistory(userId: string, postId: string, role?: string) {
     if (!userId || !postId) return null;
 
-    try {
-      await this.prisma.post.update({
-        where: { id: postId },
-        data: { viewsCount: { increment: 1 } },
-      });
-    } catch (e) {
-      // Ignore error if post ID doesn't match objectid
+    // Super admin views should not be counted as reads
+    const isSuperAdmin = role?.toUpperCase() === 'ADMIN';
+    if (!isSuperAdmin) {
+      try {
+        await this.prisma.post.update({
+          where: { id: postId },
+          data: { viewsCount: { increment: 1 } },
+        });
+      } catch (e) {
+        // Ignore error if post ID doesn't match objectid
+      }
     }
 
     const existing = await this.prisma.readingHistory.findFirst({

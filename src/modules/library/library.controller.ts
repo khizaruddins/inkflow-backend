@@ -73,9 +73,11 @@ export class LibraryController {
   @Post('history')
   @ApiOperation({ summary: 'Record story view to user reading history' })
   async recordHistory(
-    @CurrentUser('id') userId: string,
+    @CurrentUser() user: any,
     @Body('postId') postId: string,
   ) {
-    return this.libraryService.recordHistory(userId, postId);
+    const userId = user?.id || user?.sub;
+    const role = user?.role;
+    return this.libraryService.recordHistory(userId, postId, role);
   }
 }
