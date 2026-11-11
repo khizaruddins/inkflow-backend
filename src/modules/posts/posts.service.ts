@@ -3,6 +3,7 @@ import {
   NotFoundException,
   ForbiddenException,
   BadRequestException,
+  UnauthorizedException,
 } from '@nestjs/common';
 import * as bcrypt from 'bcrypt';
 import { Role, PostStatus, PostVisibility, PrivateLockType } from '@prisma/client';
@@ -95,18 +96,34 @@ export class PostsService {
     isFeatured?: boolean;
     currentUserId?: string;
     currentUserRole?: string;
+    jwtAuthFailed?: boolean;
   }) {
     const where: any = {};
     const isAdmin = query.currentUserRole === Role.ADMIN;
     const isOwnAuthorQuery = Boolean(query.currentUserId && query.authorId === query.currentUserId);
+    const requestedVisibility = query.visibility?.toUpperCase();
+    const isOwnPrivateQuery =
+      requestedVisibility === PostVisibility.PRIVATE && Boolean(query.currentUserId);
     const requestedStatus = query.status?.toUpperCase();
+
+    if (requestedVisibility === PostVisibility.PRIVATE && !query.currentUserId && query.jwtAuthFailed) {
+      throw new UnauthorizedException({
+        message: 'Your session has expired. Please refresh your login to view your private stories.',
+        code: 'SESSION_EXPIRED',
+      });
+    }
 
     if (requestedStatus) {
       if (requestedStatus === 'ALL') {
-        if (!isAdmin && !isOwnAuthorQuery) {
+        if (!isAdmin && !isOwnAuthorQuery && !isOwnPrivateQuery) {
           where.status = PostStatus.PUBLISHED;
         }
-      } else if (requestedStatus !== PostStatus.PUBLISHED && !isAdmin && !isOwnAuthorQuery) {
+      } else if (
+        requestedStatus !== PostStatus.PUBLISHED &&
+        !isAdmin &&
+        !isOwnAuthorQuery &&
+        !isOwnPrivateQuery
+      ) {
         where.status = PostStatus.PUBLISHED;
       } else {
         where.status = requestedStatus;
@@ -115,7 +132,6 @@ export class PostsService {
       where.status = PostStatus.PUBLISHED;
     }
 
-    const requestedVisibility = query.visibility?.toUpperCase();
     const isAuthorDashboardAll = requestedStatus === 'ALL' && (isOwnAuthorQuery || isAdmin);
 
     if (requestedVisibility === PostVisibility.PRIVATE) {
@@ -231,6 +247,48 @@ export class PostsService {
     });
   }
 
+  /**
+   * Fetch full post payload for editing — strictly verifies that the caller is the author.
+   */
+  async getPostForEdit(identifier: string, actorId: string) {
+    const post = await this.privatePostsService.findPostForAuthCheck(identifier);
+    if (!post) {
+      throw new NotFoundException(`Story with identifier '${identifier}' not found.`);
+    }
+
+    if (post.authorId !== actorId) {
+      throw new ForbiddenException('Only the post author can edit this blog.');
+    }
+
+    let resolvedShareToken = post.shareToken;
+    if (post.visibility === PostVisibility.PRIVATE && !resolvedShareToken) {
+      resolvedShareToken = this.privatePostsService.generateShareToken();
+      await this.prisma.post.update({
+        where: { id: post.id },
+        data: { shareToken: resolvedShareToken },
+      });
+    }
+
+    const sanitized = this.privatePostsService.sanitizePost(
+      { ...post, shareToken: resolvedShareToken },
+      {
+        currentUserId: actorId,
+        includeShareToken: true,
+      },
+    );
+
+    return {
+      ...sanitized,
+      subtitle: post.subtitle ?? '',
+      content: post.content ?? '',
+      privateLockType: post.privateLockType ?? PrivateLockType.NONE,
+      allowLinkPasswordAccess: post.allowLinkPasswordAccess ?? true,
+      requirePasswordForGrantedUsers: post.requirePasswordForGrantedUsers ?? false,
+      requireFollowerToView: post.requireFollowerToView ?? false,
+      canEdit: true,
+    };
+  }
+
   async findByShareToken(shareToken: string, viewer: ViewerContext = {}) {
     if (!shareToken || !shareToken.trim()) {
       throw new NotFoundException('Private story link is invalid.');
@@ -286,7 +344,14 @@ export class PostsService {
     }
 
     const visibility =
-      dto.visibility || (userRole === Role.READER ? PostVisibility.PRIVATE : PostVisibility.PUBLIC);
+      dto.visibility ||
+      (dto.isPrivate === true
+        ? PostVisibility.PRIVATE
+        : dto.isPrivate === false
+          ? PostVisibility.PUBLIC
+          : userRole === Role.READER
+            ? PostVisibility.PRIVATE
+            : PostVisibility.PUBLIC);
 
     if (visibility !== PostVisibility.PRIVATE && userRole === Role.READER) {
       throw new ForbiddenException('Only Writers or Admins can publish public stories.');
@@ -295,11 +360,13 @@ export class PostsService {
     const isPrivate = visibility === PostVisibility.PRIVATE;
     let secretPasswordHash: string | undefined = undefined;
     let privateLockType: PrivateLockType = PrivateLockType.NONE;
+    const rawPassword = dto.secretPassword ?? dto.password;
+    const requestedLockType = dto.privateLockType ?? dto.lockType;
 
-    if (dto.secretPassword && dto.secretPassword.trim() !== '') {
-      const trimmed = dto.secretPassword.trim();
+    if (rawPassword && rawPassword.trim() !== '') {
+      const trimmed = rawPassword.trim();
       secretPasswordHash = await bcrypt.hash(trimmed, 10);
-      privateLockType = this.privatePostsService.detectLockType(trimmed, dto.privateLockType);
+      privateLockType = this.privatePostsService.detectLockType(trimmed, requestedLockType);
     }
 
     const shareToken = isPrivate ? this.privatePostsService.generateShareToken() : null;
@@ -351,6 +418,11 @@ export class PostsService {
         wordCount,
         publishedAt: !isPrivate && status === PostStatus.PUBLISHED ? new Date() : null,
       },
+      include: {
+        author: { select: { id: true, name: true, username: true, avatar: true, bio: true } },
+        category: true,
+        tags: true,
+      },
     });
 
     return this.privatePostsService.sanitizePost(created, {
@@ -363,13 +435,14 @@ export class PostsService {
   async updatePost(id: string, authorId: string, dto: any, userRole?: string) {
     const existing = await this.prisma.post.findUnique({ where: { id } });
     if (!existing) throw new NotFoundException('Post not found');
-    if (existing.authorId !== authorId && userRole !== Role.ADMIN) {
-      throw new ForbiddenException('Only post author can update this post');
+    if (existing.authorId !== authorId) {
+      throw new ForbiddenException('Only the post author can update this post.');
     }
 
     const categoryId = await this.resolveCategoryId(dto.categoryId || existing.categoryId);
 
-    const content = dto.content || existing.content;
+    const content =
+      dto.content !== undefined && dto.content !== '' ? dto.content : existing.content;
     const wordCount = content
       .replace(/<[^>]*>/g, '')
       .split(/\s+/)
@@ -381,7 +454,11 @@ export class PostsService {
       : existing.status;
     const visibility = dto.visibility
       ? (dto.visibility.toUpperCase() as any)
-      : existing.visibility;
+      : dto.isPrivate === true
+        ? PostVisibility.PRIVATE
+        : dto.isPrivate === false
+          ? PostVisibility.PUBLIC
+          : existing.visibility;
 
     if (visibility !== PostVisibility.PRIVATE && userRole === Role.READER) {
       throw new ForbiddenException('Only Writers or Admins can publish public stories.');
@@ -422,28 +499,35 @@ export class PostsService {
 
     let secretPasswordHash = existing.secretPasswordHash;
     let privateLockType = existing.privateLockType ?? PrivateLockType.NONE;
+    const rawPassword = dto.secretPassword ?? dto.password;
+    const requestedLockType = dto.privateLockType ?? dto.lockType;
     if (dto.removePassword) {
       secretPasswordHash = null;
       privateLockType = PrivateLockType.NONE;
-    } else if (dto.secretPassword && String(dto.secretPassword).trim() !== '') {
-      const trimmed = String(dto.secretPassword).trim();
+    } else if (rawPassword && String(rawPassword).trim() !== '') {
+      const trimmed = String(rawPassword).trim();
       secretPasswordHash = await bcrypt.hash(trimmed, 10);
-      privateLockType = this.privatePostsService.detectLockType(trimmed, dto.privateLockType);
-    } else if (dto.privateLockType) {
-      privateLockType = dto.privateLockType;
+      privateLockType = this.privatePostsService.detectLockType(trimmed, requestedLockType);
+    } else if (requestedLockType) {
+      privateLockType = requestedLockType;
     }
 
     const shareToken = isPrivate
-      ? existing.shareToken || this.privatePostsService.generateShareToken()
+      ? dto.regenerateShareToken
+        ? this.privatePostsService.generateShareToken()
+        : existing.shareToken || this.privatePostsService.generateShareToken()
       : existing.shareToken;
 
     const updated = await this.prisma.post.update({
       where: { id },
       data: {
-        title: dto.title || existing.title,
-        subtitle: dto.subtitle ?? existing.subtitle,
+        title: dto.title !== undefined && String(dto.title).trim() !== '' ? dto.title : existing.title,
+        subtitle: dto.subtitle !== undefined ? dto.subtitle : existing.subtitle,
         slug,
-        excerpt: dto.excerpt || existing.excerpt,
+        excerpt:
+          dto.excerpt !== undefined && String(dto.excerpt).trim() !== ''
+            ? dto.excerpt
+            : existing.excerpt,
         content,
         coverImage,
         categoryId,
@@ -469,6 +553,11 @@ export class PostsService {
           : status === 'PUBLISHED' && !existing.publishedAt
             ? new Date()
             : existing.publishedAt,
+      },
+      include: {
+        author: { select: { id: true, name: true, username: true, avatar: true, bio: true } },
+        category: true,
+        tags: true,
       },
     });
 
@@ -614,110 +703,146 @@ export class PostsService {
   async saveDraft(authorId: string, dto: SaveDraftDto, userRole?: string) {
     const rawTitle = dto.title?.trim();
     const rawSubtitle = dto.subtitle?.trim();
+    const requestedVisibility =
+      dto.visibility ??
+      (dto.isPrivate === true
+        ? PostVisibility.PRIVATE
+        : dto.isPrivate === false
+          ? PostVisibility.PUBLIC
+          : undefined);
+
+    if (requestedVisibility && requestedVisibility !== PostVisibility.PRIVATE && userRole === Role.READER) {
+      throw new ForbiddenException('Only Writers or Admins can create public stories.');
+    }
+
+    const rawCover = dto.coverImage?.trim();
+    const rawPassword = dto.secretPassword ?? dto.password;
+    const requestedLockType = dto.privateLockType ?? dto.lockType;
+
+    if (dto.id && dto.id.trim() !== '') {
+      const postId = dto.id.trim();
+      const existing = await this.prisma.post.findUnique({ where: { id: postId } });
+      if (!existing) {
+        throw new NotFoundException('Draft or story not found.');
+      }
+      if (existing.authorId !== authorId) {
+        throw new ForbiddenException('Only the post author can edit this story.');
+      }
+
+      const targetVisibility = requestedVisibility || existing.visibility;
+      if (targetVisibility !== PostVisibility.PRIVATE && userRole === Role.READER) {
+        throw new ForbiddenException('Only Writers or Admins can create public stories.');
+      }
+
+      const resolvedTitle = rawTitle || existing.title || 'Untitled';
+      const resolvedSubtitle =
+        dto.subtitle !== undefined ? rawSubtitle ?? '' : existing.subtitle;
+      const resolvedContent =
+        dto.content !== undefined && dto.content !== '' ? dto.content : existing.content;
+      const resolvedExcerpt =
+        rawSubtitle ||
+        existing.excerpt ||
+        (resolvedTitle !== 'Untitled' ? resolvedTitle : 'Untitled Story Draft');
+
+      const categoryId = await this.resolveCategoryId(dto.categoryId || existing.categoryId);
+      const wordCount = resolvedContent
+        .replace(/<[^>]*>/g, '')
+        .split(/\s+/)
+        .filter(Boolean).length;
+      const readingTimeMinutes = Math.max(1, Math.ceil(wordCount / 200));
+      const firstImage = extractFirstImageFromContent(resolvedContent);
+
+      let finalCover = existing.coverImage;
+      if (rawCover !== undefined && rawCover !== '') {
+        if (!isDefaultPlaceholderCover(rawCover)) {
+          finalCover = rawCover;
+        } else if (firstImage) {
+          finalCover = firstImage;
+        } else {
+          finalCover = rawCover;
+        }
+      } else if ((!finalCover || isDefaultPlaceholderCover(finalCover)) && firstImage) {
+        finalCover = firstImage;
+      }
+
+      let secretPasswordHash = existing.secretPasswordHash;
+      let privateLockType = existing.privateLockType ?? PrivateLockType.NONE;
+      if (dto.removePassword) {
+        secretPasswordHash = null;
+        privateLockType = PrivateLockType.NONE;
+      } else if (rawPassword && rawPassword.trim() !== '') {
+        const trimmed = rawPassword.trim();
+        secretPasswordHash = await bcrypt.hash(trimmed, 10);
+        privateLockType = this.privatePostsService.detectLockType(trimmed, requestedLockType);
+      } else if (requestedLockType) {
+        privateLockType = requestedLockType;
+      }
+
+      const isPrivate = targetVisibility === PostVisibility.PRIVATE;
+      const shareToken = isPrivate
+        ? existing.shareToken || this.privatePostsService.generateShareToken()
+        : existing.shareToken;
+
+      const updatedDraft = await this.prisma.post.update({
+        where: { id: postId },
+        data: {
+          title: resolvedTitle,
+          subtitle: resolvedSubtitle,
+          excerpt: resolvedExcerpt,
+          content: resolvedContent,
+          coverImage: finalCover,
+          categoryId,
+          tagIds: dto.tagIds || existing.tagIds,
+          status: existing.status || 'DRAFT',
+          visibility: targetVisibility,
+          secretPasswordHash,
+          privateLockType,
+          shareToken,
+          allowLinkPasswordAccess:
+            dto.allowLinkPasswordAccess ?? existing.allowLinkPasswordAccess ?? true,
+          requirePasswordForGrantedUsers:
+            dto.requirePasswordForGrantedUsers ??
+            existing.requirePasswordForGrantedUsers ??
+            false,
+          requireFollowerToView:
+            dto.requireFollowerToView ?? existing.requireFollowerToView ?? false,
+          isFeatured: isPrivate ? false : existing.isFeatured,
+          wordCount,
+          readingTimeMinutes,
+        },
+        include: {
+          author: { select: { id: true, name: true, username: true, avatar: true, bio: true } },
+          category: true,
+          tags: true,
+        },
+      });
+
+      return this.privatePostsService.sanitizePost(updatedDraft, {
+        currentUserId: authorId,
+        currentUserRole: userRole,
+        includeShareToken: true,
+      });
+    }
 
     const title = rawTitle || 'Untitled';
     const subtitle = rawSubtitle || 'Untitled Subtitle';
     const content = dto.content || '<p></p>';
     const excerpt = rawSubtitle || (title !== 'Untitled' ? title : 'Untitled Story Draft');
-
-    if (dto.visibility && dto.visibility !== PostVisibility.PRIVATE && userRole === Role.READER) {
-      throw new ForbiddenException('Only Writers or Admins can create public stories.');
-    }
-
     const categoryId = await this.resolveCategoryId(dto.categoryId);
-
     const wordCount = content.replace(/<[^>]*>/g, '').split(/\s+/).filter(Boolean).length;
     const readingTimeMinutes = Math.max(1, Math.ceil(wordCount / 200));
-
     const firstImage = extractFirstImageFromContent(content);
-    const rawCover = dto.coverImage?.trim();
-
-    if (dto.id) {
-      const existing = await this.prisma.post.findUnique({ where: { id: dto.id } });
-      if (existing && existing.authorId === authorId) {
-        const targetVisibility = dto.visibility || existing.visibility;
-        if (targetVisibility !== PostVisibility.PRIVATE && userRole === Role.READER) {
-          throw new ForbiddenException('Only Writers or Admins can create public stories.');
-        }
-
-        let finalCover = existing.coverImage;
-        if (rawCover !== undefined && rawCover !== '') {
-          if (!isDefaultPlaceholderCover(rawCover)) {
-            finalCover = rawCover;
-          } else if (firstImage) {
-            finalCover = firstImage;
-          } else {
-            finalCover = rawCover;
-          }
-        } else if ((!finalCover || isDefaultPlaceholderCover(finalCover)) && firstImage) {
-          finalCover = firstImage;
-        }
-
-        let secretPasswordHash = existing.secretPasswordHash;
-        let privateLockType = existing.privateLockType ?? PrivateLockType.NONE;
-        if (dto.removePassword) {
-          secretPasswordHash = null;
-          privateLockType = PrivateLockType.NONE;
-        } else if (dto.secretPassword && dto.secretPassword.trim() !== '') {
-          const trimmed = dto.secretPassword.trim();
-          secretPasswordHash = await bcrypt.hash(trimmed, 10);
-          privateLockType = this.privatePostsService.detectLockType(trimmed, dto.privateLockType);
-        } else if (dto.privateLockType) {
-          privateLockType = dto.privateLockType;
-        }
-
-        const isPrivate = targetVisibility === PostVisibility.PRIVATE;
-        const shareToken = isPrivate
-          ? existing.shareToken || this.privatePostsService.generateShareToken()
-          : existing.shareToken;
-
-        const updatedDraft = await this.prisma.post.update({
-          where: { id: dto.id },
-          data: {
-            title,
-            subtitle,
-            excerpt,
-            content,
-            coverImage: finalCover,
-            categoryId,
-            tagIds: dto.tagIds || existing.tagIds,
-            status: existing.status || 'DRAFT',
-            visibility: targetVisibility,
-            secretPasswordHash,
-            privateLockType,
-            shareToken,
-            allowLinkPasswordAccess:
-              dto.allowLinkPasswordAccess ?? existing.allowLinkPasswordAccess ?? true,
-            requirePasswordForGrantedUsers:
-              dto.requirePasswordForGrantedUsers ??
-              existing.requirePasswordForGrantedUsers ??
-              false,
-            requireFollowerToView:
-              dto.requireFollowerToView ?? existing.requireFollowerToView ?? false,
-            isFeatured: isPrivate ? false : existing.isFeatured,
-            wordCount,
-            readingTimeMinutes,
-          },
-        });
-
-        return this.privatePostsService.sanitizePost(updatedDraft, {
-          currentUserId: authorId,
-          currentUserRole: userRole,
-          includeShareToken: true,
-        });
-      }
-    }
 
     const visibility =
-      dto.visibility || (userRole === Role.READER ? PostVisibility.PRIVATE : PostVisibility.PUBLIC);
+      requestedVisibility || (userRole === Role.READER ? PostVisibility.PRIVATE : PostVisibility.PUBLIC);
     const isPrivate = visibility === PostVisibility.PRIVATE;
 
     let secretPasswordHash: string | undefined = undefined;
     let privateLockType: PrivateLockType = PrivateLockType.NONE;
-    if (dto.secretPassword && dto.secretPassword.trim() !== '') {
-      const trimmed = dto.secretPassword.trim();
+    if (rawPassword && rawPassword.trim() !== '') {
+      const trimmed = rawPassword.trim();
       secretPasswordHash = await bcrypt.hash(trimmed, 10);
-      privateLockType = this.privatePostsService.detectLockType(trimmed, dto.privateLockType);
+      privateLockType = this.privatePostsService.detectLockType(trimmed, requestedLockType);
     }
 
     const slugBase =
@@ -754,6 +879,11 @@ export class PostsService {
         requireFollowerToView: dto.requireFollowerToView ?? false,
         wordCount,
         readingTimeMinutes,
+      },
+      include: {
+        author: { select: { id: true, name: true, username: true, avatar: true, bio: true } },
+        category: true,
+        tags: true,
       },
     });
 

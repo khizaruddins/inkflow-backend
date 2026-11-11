@@ -18,8 +18,20 @@ export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
   ) {
     super({
       jwtFromRequest: ExtractJwt.fromExtractors([
-        ExtractJwt.fromAuthHeaderAsBearerToken(),
-        (request) => request?.cookies?.accessToken,
+        (request) => {
+          const token = ExtractJwt.fromAuthHeaderAsBearerToken()(request);
+          if (!token || token === 'null' || token === 'undefined') {
+            return null;
+          }
+          return token;
+        },
+        (request) => {
+          const cookieToken = request?.cookies?.accessToken;
+          if (!cookieToken || cookieToken === 'null' || cookieToken === 'undefined') {
+            return null;
+          }
+          return cookieToken;
+        },
       ]),
       ignoreExpiration: false,
       secretOrKey: configService.get<string>('JWT_ACCESS_SECRET') || 'inkflow_jwt_access_super_secret_key_2026',

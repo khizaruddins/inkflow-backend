@@ -45,13 +45,28 @@ export class SaveDraftDto {
 
   @ApiProperty({ required: false })
   @IsOptional()
+  @IsBoolean()
+  isPrivate?: boolean;
+
+  @ApiProperty({ required: false })
+  @IsOptional()
   @IsString()
   secretPassword?: string;
+
+  @ApiProperty({ required: false })
+  @IsOptional()
+  @IsString()
+  password?: string;
 
   @ApiProperty({ required: false, enum: PrivateLockType })
   @IsOptional()
   @IsEnum(PrivateLockType)
   privateLockType?: PrivateLockType;
+
+  @ApiProperty({ required: false, enum: PrivateLockType })
+  @IsOptional()
+  @IsEnum(PrivateLockType)
+  lockType?: PrivateLockType;
 
   @ApiProperty({ required: false })
   @IsOptional()

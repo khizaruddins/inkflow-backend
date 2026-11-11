@@ -58,15 +58,30 @@ export class CreatePostDto {
   @IsEnum(PostVisibility)
   visibility?: PostVisibility;
 
+  @ApiProperty({ required: false, description: 'Optional boolean alias for visibility === PRIVATE' })
+  @IsOptional()
+  @IsBoolean()
+  isPrivate?: boolean;
+
   @ApiProperty({ example: 'secret123', required: false, description: 'Secret password or PIN for private posts' })
   @IsOptional()
   @IsString()
   secretPassword?: string;
 
+  @ApiProperty({ required: false, description: 'Alias for secretPassword' })
+  @IsOptional()
+  @IsString()
+  password?: string;
+
   @ApiProperty({ example: 'PIN', enum: PrivateLockType, required: false, description: 'Lock input type (NONE | PIN | PASSWORD)' })
   @IsOptional()
   @IsEnum(PrivateLockType)
   privateLockType?: PrivateLockType;
+
+  @ApiProperty({ enum: PrivateLockType, required: false, description: 'Alias for privateLockType' })
+  @IsOptional()
+  @IsEnum(PrivateLockType)
+  lockType?: PrivateLockType;
 
   @ApiProperty({ example: true, required: false, description: 'Allow anyone with share link + password/PIN to unlock' })
   @IsOptional()

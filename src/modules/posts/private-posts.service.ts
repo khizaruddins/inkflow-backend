@@ -29,6 +29,7 @@ export interface ViewerContext {
   userRole?: string | null;
   shareToken?: string | null;
   unlockToken?: string | null;
+  jwtAuthFailed?: boolean;
 }
 
 export interface AccessEvaluation {
@@ -287,6 +288,13 @@ export class PrivatePostsService {
 
     if (!hasActiveGrant && !canUseLinkPassword) {
       if (!viewer.userId) {
+        if (viewer.jwtAuthFailed) {
+          throw new UnauthorizedException({
+            message: 'Your session has expired. Please refresh your login to view this private story.',
+            code: 'SESSION_EXPIRED',
+            requiresAuth: true,
+          });
+        }
         if (hasValidShareToken) {
           throw new UnauthorizedException({
             message: 'Please sign in to access this private story.',
@@ -567,11 +575,11 @@ export class PrivatePostsService {
     };
   }
 
-  private async assertManagePermission(postId: string, actorId: string, actorRole?: string) {
+  private async assertManagePermission(postId: string, actorId: string, _actorRole?: string) {
     const post = await this.prisma.post.findUnique({ where: { id: postId } });
     if (!post) throw new NotFoundException('Story not found.');
-    if (post.authorId !== actorId && actorRole !== Role.ADMIN) {
-      throw new ForbiddenException('Only the post author or an admin can manage private blog settings.');
+    if (post.authorId !== actorId) {
+      throw new ForbiddenException('Only the post author can manage or edit this private blog.');
     }
     return post;
   }

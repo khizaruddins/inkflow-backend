@@ -9,6 +9,7 @@ import {
   Param,
   Query,
   Headers,
+  Req,
   UseGuards,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
@@ -42,12 +43,14 @@ export class PostsController {
     currentUser?: any,
     shareToken?: string,
     unlockToken?: string,
+    req?: any,
   ): ViewerContext {
     return {
       userId: currentUser?.id || currentUser?.sub || null,
       userRole: currentUser?.role || null,
       shareToken: shareToken || null,
       unlockToken: unlockToken || null,
+      jwtAuthFailed: Boolean(req?.jwtAuthFailed),
     };
   }
 
@@ -68,6 +71,7 @@ export class PostsController {
     @Query('feed') feed?: string,
     @Query('isFeatured') isFeatured?: string,
     @CurrentUser() currentUser?: any,
+    @Req() req?: any,
   ) {
     return this.postsService.findAll({
       status,
@@ -80,6 +84,7 @@ export class PostsController {
       isFeatured: isFeatured === 'true',
       currentUserId: currentUser?.id,
       currentUserRole: currentUser?.role,
+      jwtAuthFailed: Boolean(req?.jwtAuthFailed),
     });
   }
 
@@ -117,10 +122,11 @@ export class PostsController {
     @Query('unlockToken') unlockTokenQuery?: string,
     @Headers('x-private-unlock-token') unlockTokenHeader?: string,
     @CurrentUser() currentUser?: any,
+    @Req() req?: any,
   ) {
     return this.postsService.findByShareToken(
       shareToken,
-      this.buildViewerContext(currentUser, shareToken, unlockTokenHeader || unlockTokenQuery),
+      this.buildViewerContext(currentUser, shareToken, unlockTokenHeader || unlockTokenQuery, req),
     );
   }
 
@@ -302,7 +308,6 @@ export class PostsController {
   }
 
   @Delete(':id/private-access/:userId')
-  @Post(':id/private-access/:userId/revoke')
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Revoke private blog access for a specific reader' })
@@ -313,6 +318,32 @@ export class PostsController {
     @CurrentUser('role') actorRole: string,
   ) {
     return this.privatePostsService.revokePrivateAccess(id, targetUserId, actorId, actorRole);
+  }
+
+  @Post(':id/private-access/:userId/revoke')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Revoke private blog access for a specific reader (POST alias)' })
+  async revokePrivateAccessPost(
+    @Param('id') id: string,
+    @Param('userId') targetUserId: string,
+    @CurrentUser('id') actorId: string,
+    @CurrentUser('role') actorRole: string,
+  ) {
+    return this.privatePostsService.revokePrivateAccess(id, targetUserId, actorId, actorRole);
+  }
+
+  @Get(':id/edit')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Fetch full story data for editing (Author only; verifies authorId === currentUser.id)',
+  })
+  async getPostForEdit(
+    @Param('id') id: string,
+    @CurrentUser('id') authorId: string,
+  ) {
+    return this.postsService.getPostForEdit(id, authorId);
   }
 
   @Public()
@@ -330,6 +361,7 @@ export class PostsController {
     @Headers('x-share-token') shareTokenHeader?: string,
     @Headers('x-private-unlock-token') unlockTokenHeader?: string,
     @CurrentUser() currentUser?: any,
+    @Req() req?: any,
   ) {
     return this.postsService.findBySlugOrId(
       slugOrId,
@@ -337,17 +369,42 @@ export class PostsController {
         currentUser,
         shareTokenHeader || shareTokenQuery || tokenQuery || shareQuery,
         unlockTokenHeader || unlockTokenQuery,
+        req,
       ),
     );
   }
 
   @Put(':id')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Update an existing story by ID (Author only)' })
+  async replacePost(
+    @Param('id') id: string,
+    @CurrentUser('id') authorId: string,
+    @CurrentUser('role') userRole: string,
+    @Body() dto: any,
+  ) {
+    return this.postsService.updatePost(id, authorId, dto, userRole);
+  }
+
   @Patch(':id')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Partially update an existing story by ID (Author only)' })
+  async updatePost(
+    @Param('id') id: string,
+    @CurrentUser('id') authorId: string,
+    @CurrentUser('role') userRole: string,
+    @Body() dto: any,
+  ) {
+    return this.postsService.updatePost(id, authorId, dto, userRole);
+  }
+
   @Post(':id')
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Update an existing story by ID (Author or Admin)' })
-  async updatePost(
+  @ApiOperation({ summary: 'Update an existing story by ID (POST alias, Author only)' })
+  async updatePostPost(
     @Param('id') id: string,
     @CurrentUser('id') authorId: string,
     @CurrentUser('role') userRole: string,
@@ -429,10 +486,11 @@ export class PostsController {
     @Body() dto: VerifyPrivatePasswordDto,
     @Headers('x-share-token') shareTokenHeader?: string,
     @CurrentUser() currentUser?: any,
+    @Req() req?: any,
   ) {
     return this.privatePostsService.unlockPost(
       id,
-      this.buildViewerContext(currentUser, dto.shareToken || shareTokenHeader),
+      this.buildViewerContext(currentUser, dto.shareToken || shareTokenHeader, undefined, req),
       dto,
       { throwOnInvalidPassword: true },
     );
@@ -450,10 +508,11 @@ export class PostsController {
     @Body() dto: VerifyPrivatePasswordDto,
     @Headers('x-share-token') shareTokenHeader?: string,
     @CurrentUser() currentUser?: any,
+    @Req() req?: any,
   ) {
     return this.privatePostsService.unlockPost(
       id,
-      this.buildViewerContext(currentUser, dto.shareToken || shareTokenHeader),
+      this.buildViewerContext(currentUser, dto.shareToken || shareTokenHeader, undefined, req),
       dto,
       { throwOnInvalidPassword: false },
     );
