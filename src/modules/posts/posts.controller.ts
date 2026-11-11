@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Delete, Body, Param, Query, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Put, Patch, Delete, Body, Param, Query, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import { Role } from '@prisma/client';
 import { PostsService } from './posts.service';
@@ -79,6 +79,9 @@ export class PostsController {
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Create & publish a new blog post (Writer / Admin only)' })
   async create(@CurrentUser('id') authorId: string, @Body() dto: CreatePostDto) {
+    if (dto.id) {
+      return this.postsService.updatePost(dto.id, authorId, dto);
+    }
     return this.postsService.create(authorId, dto);
   }
 
@@ -111,6 +114,8 @@ export class PostsController {
     return this.postsService.findBySlugOrId(slugOrId);
   }
 
+  @Put(':id')
+  @Patch(':id')
   @Post(':id')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.ADMIN, Role.WRITER)

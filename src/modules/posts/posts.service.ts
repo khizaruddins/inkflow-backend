@@ -6,6 +6,27 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { CreatePostDto } from './dto/create-post.dto';
 import { SaveDraftDto } from './dto/save-draft.dto';
 
+const DEFAULT_COVER_IMAGE =
+  'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&w=1200&q=80';
+
+export function extractFirstImageFromContent(content?: string): string | null {
+  if (!content) return null;
+  const imgTagMatch = content.match(/<img[^>]+src=["']([^"']+)["']/i);
+  if (imgTagMatch && imgTagMatch[1]) {
+    return imgTagMatch[1].replace(/&amp;/g, '&');
+  }
+  const mdImgMatch = content.match(/!\[[^\]]*\]\(([^)]+)\)/);
+  if (mdImgMatch && mdImgMatch[1]) {
+    return mdImgMatch[1].replace(/&amp;/g, '&');
+  }
+  return null;
+}
+
+export function isDefaultPlaceholderCover(url?: string): boolean {
+  if (!url) return true;
+  return url.includes('photo-1618005182384-a83a8bd57fbe');
+}
+
 @Injectable()
 export class PostsService {
   constructor(
@@ -109,6 +130,13 @@ export class PostsService {
   }
 
   async create(authorId: string, dto: CreatePostDto) {
+    if (dto.id) {
+      const existing = await this.prisma.post.findUnique({ where: { id: dto.id } });
+      if (existing) {
+        return this.updatePost(dto.id, authorId, dto);
+      }
+    }
+
     let secretPasswordHash: string | undefined = undefined;
     if (dto.secretPassword) {
       secretPasswordHash = await bcrypt.hash(dto.secretPassword, 10);
@@ -131,14 +159,31 @@ export class PostsService {
     const wordCount = dto.content.replace(/<[^>]*>/g, '').split(/\s+/).length;
     const readingTimeMinutes = Math.max(1, Math.ceil(wordCount / 200));
 
+    // Resolve coverImage: if not provided or default placeholder, extract first image from content
+    const firstImage = extractFirstImageFromContent(dto.content);
+    let coverImage = dto.coverImage?.trim();
+    if (!coverImage || isDefaultPlaceholderCover(coverImage)) {
+      coverImage = firstImage || coverImage || DEFAULT_COVER_IMAGE;
+    }
+
+    // Resolve slug and ensure uniqueness
+    let slug = dto.slug
+      ? dto.slug.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')
+      : dto.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+    if (!slug) slug = `story-${Date.now().toString().slice(-6)}`;
+    const slugCollision = await this.prisma.post.findFirst({ where: { slug } });
+    if (slugCollision) {
+      slug = `${slug}-${Date.now().toString().slice(-4)}`;
+    }
+
     return this.prisma.post.create({
       data: {
         title: dto.title,
         subtitle: dto.subtitle,
-        slug: dto.slug,
+        slug,
         excerpt: dto.excerpt,
         content: dto.content,
-        coverImage: dto.coverImage,
+        coverImage,
         authorId,
         categoryId,
         tagIds: dto.tagIds || [],
@@ -184,15 +229,44 @@ export class PostsService {
       ? (dto.visibility.toUpperCase() as any)
       : existing.visibility;
 
+    const content = dto.content || existing.content;
+    const firstImage = extractFirstImageFromContent(content);
+
+    let coverImage = existing.coverImage;
+    if (dto.coverImage !== undefined) {
+      const trimmed = (dto.coverImage || '').trim();
+      if (trimmed && !isDefaultPlaceholderCover(trimmed)) {
+        coverImage = trimmed;
+      } else if (firstImage) {
+        coverImage = firstImage;
+      } else {
+        coverImage = trimmed || (isDefaultPlaceholderCover(existing.coverImage) ? DEFAULT_COVER_IMAGE : existing.coverImage);
+      }
+    } else if ((!coverImage || isDefaultPlaceholderCover(coverImage)) && firstImage) {
+      coverImage = firstImage;
+    }
+
+    // Resolve slug and avoid collisions with other posts
+    let slug = existing.slug;
+    if (dto.slug && dto.slug !== existing.slug) {
+      const slugCandidate = dto.slug.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+      if (slugCandidate) {
+        const slugCollision = await this.prisma.post.findFirst({
+          where: { slug: slugCandidate, id: { not: id } },
+        });
+        slug = slugCollision ? `${slugCandidate}-${Date.now().toString().slice(-4)}` : slugCandidate;
+      }
+    }
+
     return this.prisma.post.update({
       where: { id },
       data: {
         title: dto.title || existing.title,
         subtitle: dto.subtitle ?? existing.subtitle,
-        slug: dto.slug || existing.slug,
+        slug,
         excerpt: dto.excerpt || existing.excerpt,
-        content: dto.content || existing.content,
-        coverImage: dto.coverImage || existing.coverImage,
+        content,
+        coverImage,
         categoryId,
         tagIds: dto.tagIds || existing.tagIds,
         status,
@@ -334,10 +408,26 @@ export class PostsService {
     const wordCount = content.replace(/<[^>]*>/g, '').split(/\s+/).filter(Boolean).length;
     const readingTimeMinutes = Math.max(1, Math.ceil(wordCount / 200));
 
+    const firstImage = extractFirstImageFromContent(content);
+    const rawCover = dto.coverImage?.trim();
+
     // If id is provided, update existing draft
     if (dto.id) {
       const existing = await this.prisma.post.findUnique({ where: { id: dto.id } });
       if (existing && existing.authorId === authorId) {
+        let finalCover = existing.coverImage;
+        if (rawCover !== undefined && rawCover !== '') {
+          if (!isDefaultPlaceholderCover(rawCover)) {
+            finalCover = rawCover;
+          } else if (firstImage) {
+            finalCover = firstImage;
+          } else {
+            finalCover = rawCover;
+          }
+        } else if ((!finalCover || isDefaultPlaceholderCover(finalCover)) && firstImage) {
+          finalCover = firstImage;
+        }
+
         return this.prisma.post.update({
           where: { id: dto.id },
           data: {
@@ -345,10 +435,10 @@ export class PostsService {
             subtitle,
             excerpt,
             content,
-            coverImage: dto.coverImage || existing.coverImage,
+            coverImage: finalCover,
             categoryId,
             tagIds: dto.tagIds || existing.tagIds,
-            status: 'DRAFT',
+            status: existing.status || 'DRAFT',
             wordCount,
             readingTimeMinutes,
           },
@@ -362,6 +452,15 @@ export class PostsService {
       : 'untitled-draft';
     const slug = `${slugBase}-${Date.now()}`;
 
+    let newDraftCover = DEFAULT_COVER_IMAGE;
+    if (rawCover && !isDefaultPlaceholderCover(rawCover)) {
+      newDraftCover = rawCover;
+    } else if (firstImage) {
+      newDraftCover = firstImage;
+    } else if (rawCover) {
+      newDraftCover = rawCover;
+    }
+
     return this.prisma.post.create({
       data: {
         title,
@@ -369,9 +468,7 @@ export class PostsService {
         slug,
         excerpt,
         content,
-        coverImage:
-          dto.coverImage ||
-          'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&w=1200&q=80',
+        coverImage: newDraftCover,
         authorId,
         categoryId,
         tagIds: dto.tagIds || [],
