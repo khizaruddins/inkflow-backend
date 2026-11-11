@@ -16,7 +16,14 @@ export class CategoriesService {
       where,
       include: {
         _count: {
-          select: { posts: true },
+          select: {
+            posts: {
+              where: {
+                status: 'PUBLISHED',
+                visibility: { not: 'PRIVATE' },
+              },
+            },
+          },
         },
       },
       orderBy: { name: 'asc' },

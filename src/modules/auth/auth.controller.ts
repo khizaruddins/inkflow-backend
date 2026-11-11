@@ -1,4 +1,4 @@
-import { Controller, Post, Body, Res, Get, UseGuards, Req, Param } from '@nestjs/common';
+import { Controller, Post, Body, Res, Get, UseGuards, Req, Param, Query } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import { Request, Response } from 'express';
 import { AuthService } from './auth.service';
@@ -7,6 +7,7 @@ import { LoginDto } from './dto/login.dto';
 import { Public } from '../../common/decorators/public.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
+import { OptionalJwtAuthGuard } from './guards/optional-jwt-auth.guard';
 
 @ApiTags('Auth')
 @Controller('auth')
@@ -104,11 +105,26 @@ export class AuthController {
     return this.authService.getUserMe(userId);
   }
 
+  @Get('users/search')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Search users by name, username, or email for private blog sharing' })
+  async searchUsers(
+    @CurrentUser('id') currentUserId: string,
+    @Query('q') q?: string,
+  ) {
+    return this.authService.searchUsers(currentUserId, q);
+  }
+
   @Public()
+  @UseGuards(OptionalJwtAuthGuard)
   @Get('users/by-username/:username')
   @ApiOperation({ summary: 'Get public user profile & publications by username' })
-  async getUserByUsername(@Param('username') username: string) {
-    return this.authService.getUserByUsername(username);
+  async getUserByUsername(
+    @Param('username') username: string,
+    @CurrentUser() currentUser?: any,
+  ) {
+    return this.authService.getUserByUsername(username, currentUser);
   }
 
   @Public()

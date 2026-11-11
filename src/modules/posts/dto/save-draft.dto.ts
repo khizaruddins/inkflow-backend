@@ -1,5 +1,6 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsOptional, IsString, IsArray } from 'class-validator';
+import { IsOptional, IsString, IsArray, IsEnum, IsBoolean } from 'class-validator';
+import { PostVisibility, PrivateLockType } from '@prisma/client';
 
 export class SaveDraftDto {
   @ApiProperty({ required: false, description: 'Post ID if updating an existing draft' })
@@ -36,4 +37,39 @@ export class SaveDraftDto {
   @IsOptional()
   @IsArray()
   tagIds?: string[];
+
+  @ApiProperty({ required: false, enum: PostVisibility })
+  @IsOptional()
+  @IsEnum(PostVisibility)
+  visibility?: PostVisibility;
+
+  @ApiProperty({ required: false })
+  @IsOptional()
+  @IsString()
+  secretPassword?: string;
+
+  @ApiProperty({ required: false, enum: PrivateLockType })
+  @IsOptional()
+  @IsEnum(PrivateLockType)
+  privateLockType?: PrivateLockType;
+
+  @ApiProperty({ required: false })
+  @IsOptional()
+  @IsBoolean()
+  allowLinkPasswordAccess?: boolean;
+
+  @ApiProperty({ required: false })
+  @IsOptional()
+  @IsBoolean()
+  requirePasswordForGrantedUsers?: boolean;
+
+  @ApiProperty({ required: false })
+  @IsOptional()
+  @IsBoolean()
+  requireFollowerToView?: boolean;
+
+  @ApiProperty({ required: false })
+  @IsOptional()
+  @IsBoolean()
+  removePassword?: boolean;
 }

@@ -50,6 +50,19 @@ enum NotificationType {
   RESPONSE
   REPLY
   FOLLOW
+  PRIVATE_SHARE
+}
+
+enum PrivateLockType {
+  NONE
+  PIN
+  PASSWORD
+}
+
+enum PrivateAccessStatus {
+  ACTIVE
+  CONSUMED
+  REVOKED
 }
 
 // ------------------------------------------------------
@@ -78,8 +91,10 @@ model User {
   history              ReadingHistory[]
   notifications        Notification[]       @relation("UserNotifications")
   reports              Report[]             @relation("Reporter")
-  creatorApplications  CreatorApplication[]
-  postClaps            PostClap[]
+  creatorApplications     CreatorApplication[]
+  postClaps               PostClap[]
+  privateAccesses         PrivatePostAccess[]  @relation("PrivateAccessRecipient")
+  grantedPrivateAccesses  PrivatePostAccess[]  @relation("PrivateAccessGrantor")
 
   createdAt            DateTime             @default(now())
   updatedAt            DateTime             @updatedAt
@@ -134,10 +149,15 @@ model Post {
   tagIds             String[]         @db.ObjectId
   tags               Tag[]            @relation(fields: [tagIds], references: [id])
 
-  status             PostStatus       @default(DRAFT)
-  visibility         PostVisibility   @default(PUBLIC)
-  secretPasswordHash String?          // For private encrypted story gates
-  reviewFeedback     String?          // Admin feedback notes for revision
+  status                         PostStatus          @default(DRAFT)
+  visibility                     PostVisibility      @default(PUBLIC)
+  secretPasswordHash             String?             // Hashed PIN or password for private story access
+  privateLockType                PrivateLockType?    @default(NONE)
+  shareToken                     String?             // Random secret token for private sharing URL
+  allowLinkPasswordAccess        Boolean?            @default(true)
+  requirePasswordForGrantedUsers Boolean?            @default(false)
+  requireFollowerToView          Boolean?            @default(false)
+  reviewFeedback                 String?             // Admin feedback notes for revision
 
   readingTimeMinutes Int              @default(3)
   wordCount          Int              @default(0)
@@ -158,11 +178,45 @@ model Post {
   highlights         Highlight[]
   history            ReadingHistory[]
   postClaps          PostClap[]
+  privateAccesses    PrivatePostAccess[]
 
   publishedAt        DateTime?
   scheduledAt        DateTime?
   createdAt          DateTime         @default(now())
   updatedAt          DateTime         @updatedAt
+
+  @@index([shareToken])
+}
+
+model PrivatePostAccess {
+  id            String              @id @default(auto()) @map("_id") @db.ObjectId
+  postId        String              @db.ObjectId
+  post          Post                @relation(fields: [postId], references: [id], onDelete: Cascade)
+
+  userId        String              @db.ObjectId
+  user          User                @relation("PrivateAccessRecipient", fields: [userId], references: [id], onDelete: Cascade)
+
+  grantedById   String              @db.ObjectId
+  grantedBy     User                @relation("PrivateAccessGrantor", fields: [grantedById], references: [id], onDelete: Cascade)
+
+  oneTimeView   Boolean             @default(false)
+  hasViewed     Boolean             @default(false)
+  viewCount     Int                 @default(0)
+  firstViewedAt DateTime?
+  lastViewedAt  DateTime?
+
+  passcodeHash    String?
+  passcodeType    PrivateLockType     @default(NONE)
+  requirePassword Boolean?
+
+  status          PrivateAccessStatus @default(ACTIVE)
+  revokedAt       DateTime?
+
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+
+  @@unique([postId, userId])
+  @@index([userId, status])
 }
 
 model PostVersion {

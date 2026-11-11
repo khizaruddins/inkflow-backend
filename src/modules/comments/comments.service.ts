@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../common/database/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { PostsService, RequestUser } from '../posts/posts.service';
 import { CreateCommentDto } from './dto/create-comment.dto';
 import { ReportCommentDto } from './dto/report-comment.dto';
 
@@ -9,11 +10,22 @@ export class CommentsService {
   constructor(
     private prisma: PrismaService,
     private notificationsService: NotificationsService,
+    private postsService: PostsService,
   ) {}
 
-  async findByPostId(postId: string) {
+  async findByPostId(
+    postId: string,
+    currentUser?: RequestUser | null,
+    options?: { shareToken?: string; unlockToken?: string },
+  ) {
     const isObjectId = /^[0-9a-fA-F]{24}$/.test(postId);
     if (!isObjectId) return [];
+
+    await this.postsService.assertCanAccessPostById(postId, currentUser, {
+      shareToken: options?.shareToken,
+      unlockToken: options?.unlockToken,
+      allowConsumedViewSession: true,
+    });
 
     return this.prisma.comment.findMany({
       where: { postId, parentId: null },
@@ -30,7 +42,18 @@ export class CommentsService {
     });
   }
 
-  async create(authorId: string, dto: CreateCommentDto) {
+  async create(
+    authorId: string,
+    dto: CreateCommentDto,
+    currentUser?: RequestUser | null,
+    unlockToken?: string,
+  ) {
+    await this.postsService.assertCanAccessPostById(
+      dto.postId,
+      currentUser || { id: authorId, role: 'READER' },
+      { unlockToken, allowConsumedViewSession: true },
+    );
+
     const comment = await this.prisma.comment.create({
       data: {
         postId: dto.postId,

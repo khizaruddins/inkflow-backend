@@ -1,6 +1,6 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { IsNotEmpty, IsOptional, IsString, IsEnum, IsBoolean, IsArray } from 'class-validator';
-import { PostStatus, PostVisibility } from '@prisma/client';
+import { PostStatus, PostVisibility, PrivateLockType } from '@prisma/client';
 
 export class CreatePostDto {
   @ApiProperty({ example: '6ab3a11eb05a5f9f06ac41ff', required: false, description: 'Post ID if updating an existing post or draft' })
@@ -18,10 +18,10 @@ export class CreatePostDto {
   @IsString()
   subtitle?: string;
 
-  @ApiProperty({ example: 'building-next-generation-react-19-frontend-architectures' })
+  @ApiProperty({ example: 'building-next-generation-react-19-frontend-architectures', required: false })
+  @IsOptional()
   @IsString()
-  @IsNotEmpty()
-  slug: string;
+  slug?: string;
 
   @ApiProperty({ example: 'Explore how React 19 Server Components combined with Next.js 16...' })
   @IsString()
@@ -58,8 +58,33 @@ export class CreatePostDto {
   @IsEnum(PostVisibility)
   visibility?: PostVisibility;
 
-  @ApiProperty({ example: 'secret123', required: false, description: 'Secret password for private posts' })
+  @ApiProperty({ example: 'secret123', required: false, description: 'Secret password or PIN for private posts' })
   @IsOptional()
   @IsString()
   secretPassword?: string;
+
+  @ApiProperty({ example: 'PIN', enum: PrivateLockType, required: false, description: 'Lock input type (NONE | PIN | PASSWORD)' })
+  @IsOptional()
+  @IsEnum(PrivateLockType)
+  privateLockType?: PrivateLockType;
+
+  @ApiProperty({ example: true, required: false, description: 'Allow anyone with share link + password/PIN to unlock' })
+  @IsOptional()
+  @IsBoolean()
+  allowLinkPasswordAccess?: boolean;
+
+  @ApiProperty({ example: false, required: false, description: 'Also require blog password for explicitly granted users' })
+  @IsOptional()
+  @IsBoolean()
+  requirePasswordForGrantedUsers?: boolean;
+
+  @ApiProperty({ example: false, required: false, description: 'Require readers to follow the author before viewing' })
+  @IsOptional()
+  @IsBoolean()
+  requireFollowerToView?: boolean;
+
+  @ApiProperty({ example: false, required: false, description: 'Remove existing blog password when updating' })
+  @IsOptional()
+  @IsBoolean()
+  removePassword?: boolean;
 }

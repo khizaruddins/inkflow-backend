@@ -7,7 +7,12 @@ export class AnalyticsService {
 
   async getSummary() {
     const totalPosts = await this.prisma.post.count();
-    const publishedPosts = await this.prisma.post.count({ where: { status: 'PUBLISHED' } });
+    const publishedPosts = await this.prisma.post.count({
+      where: { status: 'PUBLISHED', visibility: { not: 'PRIVATE' } },
+    });
+    const privatePosts = await this.prisma.post.count({
+      where: { visibility: 'PRIVATE' },
+    });
     const totalUsers = await this.prisma.user.count();
     const writersCount = await this.prisma.user.count({ where: { role: { in: ['WRITER', 'ADMIN'] } } });
     const readersCount = await this.prisma.user.count({ where: { role: 'READER' } });
@@ -25,6 +30,7 @@ export class AnalyticsService {
       data: {
         totalPosts,
         publishedPosts,
+        privatePosts,
         totalUsers,
         writersCount,
         readersCount,

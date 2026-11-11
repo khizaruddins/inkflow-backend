@@ -176,7 +176,7 @@ export class AuthService implements OnModuleInit {
     return userWithoutPassword;
   }
 
-  async getUserByUsername(username: string) {
+  async getUserByUsername(username: string, currentUser?: { id?: string; role?: string } | null) {
     const user = await this.prisma.user.findFirst({
       where: {
         OR: [
@@ -186,7 +186,10 @@ export class AuthService implements OnModuleInit {
       },
       include: {
         posts: {
-          where: { status: 'PUBLISHED' },
+          where: {
+            status: 'PUBLISHED',
+            visibility: { not: 'PRIVATE' },
+          },
           orderBy: { publishedAt: 'desc' },
           include: {
             category: true,
@@ -200,8 +203,19 @@ export class AuthService implements OnModuleInit {
       throw new NotFoundException(`User @${username} not found`);
     }
 
+    const isAuthenticated = Boolean(currentUser?.id);
+    const sanitizedPosts = user.posts.map((post) => {
+      const { secretPasswordHash, shareToken, ...rest } = post as any;
+      return {
+        ...rest,
+        clapsCount: isAuthenticated ? post.clapsCount : 0,
+        clapsVisible: isAuthenticated,
+        canInteract: isAuthenticated,
+      };
+    });
+
     const { masterPrivatePassword, ...publicUser } = user;
-    return publicUser;
+    return { ...publicUser, posts: sanitizedPosts };
   }
 
   async getUserFollowers(userIdOrUsername: string) {
@@ -273,6 +287,50 @@ export class AuthService implements OnModuleInit {
     });
 
     return following;
+  }
+
+  async searchUsers(currentUserId: string, query?: string) {
+    const trimmed = (query || '').trim();
+    const currentUser = await this.prisma.user.findUnique({
+      where: { id: currentUserId },
+      select: { followingUserIds: true },
+    });
+    const currentFollowingSet = new Set(currentUser?.followingUserIds || []);
+
+    const where: any = {
+      id: { not: currentUserId },
+    };
+
+    if (trimmed) {
+      where.OR = [
+        { name: { contains: trimmed, mode: 'insensitive' } },
+        { username: { contains: trimmed, mode: 'insensitive' } },
+        { email: { equals: trimmed, mode: 'insensitive' } },
+      ];
+    }
+
+    const users = await this.prisma.user.findMany({
+      where,
+      select: {
+        id: true,
+        name: true,
+        username: true,
+        avatar: true,
+        bio: true,
+        role: true,
+        followersCount: true,
+        followingCount: true,
+        followingUserIds: true,
+      },
+      take: 25,
+      orderBy: { name: 'asc' },
+    });
+
+    return users.map(({ followingUserIds, ...u }) => ({
+      ...u,
+      isFollower: (followingUserIds || []).includes(currentUserId),
+      isFollowing: currentFollowingSet.has(u.id),
+    }));
   }
 
   async toggleFollowUser(currentUserId: string, targetUserId: string) {

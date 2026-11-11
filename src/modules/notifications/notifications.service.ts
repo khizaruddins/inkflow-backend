@@ -1,7 +1,8 @@
 import { Injectable } from '@nestjs/common';
+import { PostVisibility, PrivateAccessStatus } from '@prisma/client';
 import { PrismaService } from '../../common/database/prisma.service';
 
-export type NotificationTypeEnum = 'CLAP' | 'RESPONSE' | 'REPLY' | 'FOLLOW';
+export type NotificationTypeEnum = 'CLAP' | 'RESPONSE' | 'REPLY' | 'FOLLOW' | 'PRIVATE_SHARE';
 
 @Injectable()
 export class NotificationsService {
@@ -43,12 +44,13 @@ export class NotificationsService {
     const followingIds = currentUser?.followingUserIds || [];
     const existingPostIds = new Set(rawNotifs.map((n) => n.postId).filter(Boolean));
 
-    // Ensure publications from followed creators are persisted as real notifications
+    // Ensure publications from followed creators are persisted as real notifications (never private blogs!)
     if (followingIds.length > 0) {
       const followedPosts = await this.prisma.post.findMany({
         where: {
           authorId: { in: followingIds },
           status: 'PUBLISHED',
+          visibility: { not: PostVisibility.PRIVATE },
         },
         orderBy: { publishedAt: 'desc' },
         take: 20,
@@ -105,15 +107,45 @@ export class NotificationsService {
       postIds.length > 0
         ? this.prisma.post.findMany({
             where: { id: { in: postIds } },
-            select: { id: true, title: true, slug: true, authorId: true },
+            select: { id: true, title: true, slug: true, authorId: true, visibility: true },
           })
         : [],
     ]);
 
+    const privatePostIds = posts
+      .filter((p) => p.visibility === PostVisibility.PRIVATE && p.authorId !== userId)
+      .map((p) => p.id);
+
+    const activePrivateAccessIds = new Set<string>();
+    if (privatePostIds.length > 0) {
+      const accesses = await this.prisma.privatePostAccess.findMany({
+        where: {
+          userId,
+          postId: { in: privatePostIds },
+          status: PrivateAccessStatus.ACTIVE,
+        },
+        select: { postId: true, oneTimeView: true, hasViewed: true },
+      });
+      for (const a of accesses) {
+        if (!(a.oneTimeView && a.hasViewed)) {
+          activePrivateAccessIds.add(a.postId);
+        }
+      }
+    }
+
     const actorMap = new Map<string, any>(actors.map((a) => [a.id, a] as [string, any]));
     const postMap = new Map<string, any>(posts.map((p) => [p.id, p] as [string, any]));
 
-    const formattedNotifs = rawNotifs.map((n) => {
+    const visibleNotifs = rawNotifs.filter((n) => {
+      if (!n.postId) return true;
+      const post = postMap.get(n.postId);
+      if (!post) return true;
+      if (post.visibility !== PostVisibility.PRIVATE) return true;
+      if (post.authorId === userId) return true;
+      return activePrivateAccessIds.has(post.id);
+    });
+
+    const formattedNotifs = visibleNotifs.map((n) => {
       const actor = actorMap.get(n.actorId);
       const post = n.postId ? postMap.get(n.postId) : null;
       const typeLower = n.type.toLowerCase();
@@ -129,6 +161,8 @@ export class NotificationsService {
         metaText = 'responded to';
       } else if (n.type === 'REPLY') {
         metaText = 'replied to your comment on';
+      } else if ((n.type as string) === 'PRIVATE_SHARE') {
+        metaText = 'shared a private story with you:';
       } else if (n.type === 'FOLLOW') {
         if (!n.postId && currentUser?.followingUserIds?.includes(n.actorId)) {
           displayActorName = `You started following ${actor?.name || 'writer'}`;
@@ -138,14 +172,17 @@ export class NotificationsService {
         }
       }
 
-      if (post && post.authorId === n.actorId) {
+      if (post && post.authorId === n.actorId && (n.type as string) !== 'PRIVATE_SHARE') {
         displayActorName = actor?.name || 'Writer';
         metaText = 'published';
       }
 
       return {
         id: n.id,
-        type: post && post.authorId === n.actorId ? 'publish' : typeLower,
+        type:
+          post && post.authorId === n.actorId && (n.type as string) !== 'PRIVATE_SHARE'
+            ? 'publish'
+            : typeLower,
         actorName: displayActorName,
         actorAvatar:
           actor?.avatar ||

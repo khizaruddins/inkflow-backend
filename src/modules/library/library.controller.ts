@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Delete, Body, Param, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Delete, Body, Param, Headers, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { LibraryService } from './library.service';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
@@ -30,32 +30,37 @@ export class LibraryController {
 
   @Get('bookmarks')
   @ApiOperation({ summary: 'Get saved bookmarked articles' })
-  async getBookmarks(@CurrentUser('id') userId: string) {
-    return this.libraryService.getBookmarks(userId);
+  async getBookmarks(@CurrentUser() user: any) {
+    return this.libraryService.getBookmarks(user.id, user.role);
   }
 
   @Post('bookmarks/toggle')
   @ApiOperation({ summary: 'Toggle article bookmark' })
-  async toggleBookmark(@CurrentUser('id') userId: string, @Body('postId') postId: string) {
-    return this.libraryService.toggleBookmark(userId, postId);
+  async toggleBookmark(
+    @CurrentUser() user: any,
+    @Body('postId') postId: string,
+    @Headers('x-private-unlock-token') unlockToken?: string,
+  ) {
+    return this.libraryService.toggleBookmark(user.id, postId, user, unlockToken);
   }
 
   @Get('highlights')
   @ApiOperation({ summary: 'Fetch user text selection quote highlights' })
-  async getHighlights(@CurrentUser('id') userId: string) {
-    return this.libraryService.getHighlights(userId);
+  async getHighlights(@CurrentUser() user: any) {
+    return this.libraryService.getHighlights(user.id, user.role);
   }
 
   @Post('highlights')
   @ApiOperation({ summary: 'Save a text selection quote highlight' })
   async createHighlight(
-    @CurrentUser('id') userId: string,
+    @CurrentUser() user: any,
     @Body('postId') postId: string,
     @Body('text') text: string,
     @Body('title') title?: string,
     @Body('note') note?: string,
+    @Headers('x-private-unlock-token') unlockToken?: string,
   ) {
-    return this.libraryService.createHighlight(userId, postId, text, title, note);
+    return this.libraryService.createHighlight(user.id, postId, text, title, note, user, unlockToken);
   }
 
   @Delete('highlights/:id')
@@ -66,8 +71,8 @@ export class LibraryController {
 
   @Get('history')
   @ApiOperation({ summary: 'Get recent reading history' })
-  async getHistory(@CurrentUser('id') userId: string) {
-    return this.libraryService.getHistory(userId);
+  async getHistory(@CurrentUser() user: any) {
+    return this.libraryService.getHistory(user.id, user.role);
   }
 
   @Post('history')
@@ -75,9 +80,10 @@ export class LibraryController {
   async recordHistory(
     @CurrentUser() user: any,
     @Body('postId') postId: string,
+    @Headers('x-private-unlock-token') unlockToken?: string,
   ) {
     const userId = user?.id || user?.sub;
     const role = user?.role;
-    return this.libraryService.recordHistory(userId, postId, role);
+    return this.libraryService.recordHistory(userId, postId, role, user, unlockToken);
   }
 }
