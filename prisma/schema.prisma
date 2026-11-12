@@ -51,6 +51,7 @@ enum NotificationType {
   REPLY
   FOLLOW
   PRIVATE_SHARE
+  EDITORIAL_FLAG
 }
 
 enum PrivateLockType {
@@ -320,6 +321,7 @@ model Notification {
   type        NotificationType
   actorId     String           @db.ObjectId
   postId      String?          @db.ObjectId
+  message     String?
   read        Boolean          @default(false)
   createdAt   DateTime         @default(now())
 }

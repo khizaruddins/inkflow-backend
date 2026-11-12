@@ -2,7 +2,13 @@ import { Injectable } from '@nestjs/common';
 import { PostVisibility, PrivateAccessStatus } from '@prisma/client';
 import { PrismaService } from '../../common/database/prisma.service';
 
-export type NotificationTypeEnum = 'CLAP' | 'RESPONSE' | 'REPLY' | 'FOLLOW' | 'PRIVATE_SHARE';
+export type NotificationTypeEnum =
+  | 'CLAP'
+  | 'RESPONSE'
+  | 'REPLY'
+  | 'FOLLOW'
+  | 'PRIVATE_SHARE'
+  | 'EDITORIAL_FLAG';
 
 @Injectable()
 export class NotificationsService {
@@ -107,7 +113,7 @@ export class NotificationsService {
       postIds.length > 0
         ? this.prisma.post.findMany({
             where: { id: { in: postIds } },
-            select: { id: true, title: true, slug: true, authorId: true, visibility: true },
+            select: { id: true, title: true, slug: true, authorId: true, visibility: true, status: true },
           })
         : [],
     ]);
@@ -154,8 +160,14 @@ export class NotificationsService {
       let title = post?.title;
       let slug = post?.slug;
       let displayActorName = actor?.name || 'A user';
+      const isEditorialFlag = (n.type as string) === 'EDITORIAL_FLAG';
 
-      if (n.type === 'CLAP') {
+      if (isEditorialFlag) {
+        displayActorName = actor?.name || 'Editorial Team';
+        metaText = n.message
+          ? `flagged your story as improper and moved it to Draft ("${n.message}"):`
+          : 'flagged your story as improper and moved it to Draft so you can edit and republish:';
+      } else if (n.type === 'CLAP') {
         metaText = 'clapped for';
       } else if (n.type === 'RESPONSE') {
         metaText = 'responded to';
@@ -172,7 +184,12 @@ export class NotificationsService {
         }
       }
 
-      if (post && post.authorId === n.actorId && (n.type as string) !== 'PRIVATE_SHARE') {
+      if (
+        post &&
+        post.authorId === n.actorId &&
+        (n.type as string) !== 'PRIVATE_SHARE' &&
+        !isEditorialFlag
+      ) {
         displayActorName = actor?.name || 'Writer';
         metaText = 'published';
       }
@@ -180,15 +197,21 @@ export class NotificationsService {
       return {
         id: n.id,
         type:
-          post && post.authorId === n.actorId && (n.type as string) !== 'PRIVATE_SHARE'
+          post &&
+          post.authorId === n.actorId &&
+          (n.type as string) !== 'PRIVATE_SHARE' &&
+          !isEditorialFlag
             ? 'publish'
             : typeLower,
         actorName: displayActorName,
         actorAvatar:
           actor?.avatar ||
           `https://ui-avatars.com/api/?name=${encodeURIComponent(displayActorName)}&background=random`,
+        targetId: post?.id || n.postId || undefined,
         targetTitle: title,
         targetSlug: slug,
+        targetStatus: post?.status,
+        message: n.message || undefined,
         isRead: Boolean(n.read),
         metaText,
         timestamp: this.formatTimeAgo(n.createdAt),
@@ -226,8 +249,10 @@ export class NotificationsService {
     actorId: string;
     type: NotificationTypeEnum;
     postId?: string;
+    message?: string;
+    allowSelf?: boolean;
   }) {
-    if (data.recipientId === data.actorId) return null;
+    if (!data.allowSelf && data.recipientId === data.actorId) return null;
 
     return this.prisma.notification.create({
       data: {
@@ -235,6 +260,7 @@ export class NotificationsService {
         actorId: data.actorId,
         type: data.type as any,
         postId: data.postId || null,
+        message: data.message || null,
         read: false,
       },
     });

@@ -153,6 +153,7 @@ export class PrivatePostsService {
       hasPassword,
       lockType,
       isPrivate: post.visibility === PostVisibility.PRIVATE,
+      canEdit: Boolean(options?.currentUserId && (isAuthor || isAdmin)),
       clapsCount: isAuthenticated ? post.clapsCount : 0,
       clapsVisible: isAuthenticated,
       canInteract: isAuthenticated,
@@ -186,10 +187,10 @@ export class PrivatePostsService {
   async evaluateAccess(
     post: any,
     viewer: ViewerContext,
-    options?: { allowConsumedViewSession?: boolean },
+    options?: { allowConsumedViewSession?: boolean; allowPinUnlockToken?: boolean },
   ): Promise<AccessEvaluation> {
     const isAuthor = Boolean(viewer.userId && post.authorId === viewer.userId);
-    const isAdmin = viewer.userRole === Role.ADMIN;
+    const isAdmin = String(viewer.userRole || '').toUpperCase() === Role.ADMIN;
 
     if (post.visibility !== PostVisibility.PRIVATE) {
       return {
@@ -206,17 +207,78 @@ export class PrivatePostsService {
       };
     }
 
-    if (isAuthor || isAdmin) {
+    // Only Admin can bypass PIN/password and private access gates unconditionally
+    if (isAdmin) {
       return {
         allowed: true,
         locked: false,
         isAuthor,
-        isAdmin,
+        isAdmin: true,
         isAuthorOrAdmin: true,
         requiresPassword: false,
         lockType: PrivateLockType.NONE,
         isOneTime: false,
         effectivePasswordHash: null,
+        accessGrant: null,
+      };
+    }
+
+    const postLockType =
+      post.privateLockType && post.privateLockType !== PrivateLockType.NONE
+        ? post.privateLockType
+        : post.secretPasswordHash
+          ? PrivateLockType.PASSWORD
+          : PrivateLockType.NONE;
+
+    // Non-admin authors can access their own private blog directly ONLY if no PIN/password is set;
+    // when PIN or password is configured, only Admin bypasses the PIN/password gate.
+    if (isAuthor) {
+      if (!post.secretPasswordHash) {
+        return {
+          allowed: true,
+          locked: false,
+          isAuthor: true,
+          isAdmin: false,
+          isAuthorOrAdmin: true,
+          requiresPassword: false,
+          lockType: PrivateLockType.NONE,
+          isOneTime: false,
+          effectivePasswordHash: null,
+          accessGrant: null,
+        };
+      }
+
+      const canReuseAuthorUnlockToken =
+        postLockType !== PrivateLockType.PIN || Boolean(options?.allowPinUnlockToken);
+
+      if (canReuseAuthorUnlockToken && viewer.unlockToken) {
+        const expectedFp = this.getPasswordFingerprint(post.secretPasswordHash);
+        if (this.verifyUnlockToken(viewer.unlockToken, post.id, viewer.userId || null, expectedFp)) {
+          return {
+            allowed: true,
+            locked: false,
+            isAuthor: true,
+            isAdmin: false,
+            isAuthorOrAdmin: true,
+            requiresPassword: true,
+            lockType: postLockType,
+            isOneTime: false,
+            effectivePasswordHash: post.secretPasswordHash,
+            accessGrant: null,
+          };
+        }
+      }
+
+      return {
+        allowed: true,
+        locked: true,
+        isAuthor: true,
+        isAdmin: false,
+        isAuthorOrAdmin: true,
+        requiresPassword: true,
+        lockType: postLockType,
+        isOneTime: false,
+        effectivePasswordHash: post.secretPasswordHash,
         accessGrant: null,
       };
     }
@@ -276,7 +338,6 @@ export class PrivatePostsService {
     }
 
     const allowLinkPasswordAccess = post.allowLinkPasswordAccess ?? true;
-    const postLockType = post.privateLockType ?? PrivateLockType.NONE;
 
     const hasActiveGrant = Boolean(accessGrant && accessGrant.status === PrivateAccessStatus.ACTIVE);
     const hasValidShareToken = Boolean(
@@ -347,7 +408,9 @@ export class PrivatePostsService {
             ? accessGrant.passcodeType
             : PrivateLockType.PASSWORD;
       } else {
+        // When PIN is enabled on the blog, always enforce PIN even for granted users
         const mustUseBlogPassword =
+          (postLockType === PrivateLockType.PIN && Boolean(post.secretPasswordHash)) ||
           accessGrant.requirePassword === true ||
           (accessGrant.requirePassword === null && Boolean(post.requirePasswordForGrantedUsers));
         if (mustUseBlogPassword && post.secretPasswordHash) {
@@ -384,7 +447,12 @@ export class PrivatePostsService {
       };
     }
 
-    if (!isOneTime && viewer.unlockToken) {
+    // For PIN-locked blogs, NEVER auto-unlock on page loads/refreshes from a cached unlockToken.
+    // Only allow unlockToken during an active unlocked page session (claps, comments, read tracking).
+    const canReuseUnlockToken =
+      !isOneTime && (lockType !== PrivateLockType.PIN || Boolean(options?.allowPinUnlockToken));
+
+    if (canReuseUnlockToken && viewer.unlockToken) {
       const expectedFp = this.getPasswordFingerprint(effectivePasswordHash);
       if (this.verifyUnlockToken(viewer.unlockToken, post.id, viewer.userId || null, expectedFp)) {
         return {
@@ -428,6 +496,9 @@ export class PrivatePostsService {
         author: { select: { id: true, name: true, username: true, avatar: true, bio: true } },
         category: true,
         tags: true,
+        privateAccesses: {
+          select: { id: true, status: true },
+        },
         comments: {
           include: {
             author: { select: { id: true, name: true, username: true, avatar: true } },
@@ -444,14 +515,17 @@ export class PrivatePostsService {
   async assertUnlockedAccess(
     postIdOrSlug: string,
     viewer: ViewerContext,
-    options?: { allowConsumedViewSession?: boolean },
+    options?: { allowConsumedViewSession?: boolean; allowPinUnlockToken?: boolean },
   ) {
     const post = await this.findPostForAuthCheck(postIdOrSlug);
     if (!post) {
       throw new NotFoundException('Story not found.');
     }
 
-    const evaluation = await this.evaluateAccess(post, viewer, options);
+    const evaluation = await this.evaluateAccess(post, viewer, {
+      ...options,
+      allowPinUnlockToken: options?.allowPinUnlockToken ?? true,
+    });
     if (evaluation.locked) {
       throw new ForbiddenException({
         message: 'This private story is locked. Please unlock it first.',
@@ -483,7 +557,7 @@ export class PrivatePostsService {
 
     const evaluation = await this.evaluateAccess(post, effectiveViewer);
 
-    if (evaluation.isAuthorOrAdmin) {
+    if (evaluation.isAdmin) {
       return {
         success: true,
         unlocked: true,
@@ -570,16 +644,17 @@ export class PrivatePostsService {
       post: this.sanitizePost(post, {
         currentUserId: viewer.userId,
         currentUserRole: viewer.userRole,
-        includeShareToken: false,
+        includeShareToken: evaluation.isAuthorOrAdmin,
       }),
     };
   }
 
-  private async assertManagePermission(postId: string, actorId: string, _actorRole?: string) {
+  private async assertManagePermission(postId: string, actorId: string, actorRole?: string) {
     const post = await this.prisma.post.findUnique({ where: { id: postId } });
     if (!post) throw new NotFoundException('Story not found.');
-    if (post.authorId !== actorId) {
-      throw new ForbiddenException('Only the post author can manage or edit this private blog.');
+    const isAdmin = String(actorRole || '').toUpperCase() === Role.ADMIN;
+    if (post.authorId !== actorId && !isAdmin) {
+      throw new ForbiddenException('Only the post author or an Admin can manage this private blog.');
     }
     return post;
   }

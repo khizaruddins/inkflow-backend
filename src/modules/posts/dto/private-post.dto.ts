@@ -139,3 +139,18 @@ export class VerifyPrivatePasswordDto {
   @IsString()
   shareToken?: string;
 }
+
+export class RecordPostViewDto {
+  @ApiProperty({ required: false, description: 'Active reading duration in milliseconds' })
+  @IsOptional()
+  readDurationMs?: number;
+
+  @ApiProperty({ required: false, description: 'Whether the reader scrolled down to the bottom finish line' })
+  @IsOptional()
+  @IsBoolean()
+  reachedBottom?: boolean;
+
+  @ApiProperty({ required: false, description: 'Reported client word count of article body' })
+  @IsOptional()
+  wordCount?: number;
+}

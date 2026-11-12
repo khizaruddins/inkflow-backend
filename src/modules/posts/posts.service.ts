@@ -11,6 +11,7 @@ import { PrismaService } from '../../common/database/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { CreatePostDto } from './dto/create-post.dto';
 import { SaveDraftDto } from './dto/save-draft.dto';
+import { RecordPostViewDto } from './dto/private-post.dto';
 import { PrivatePostsService, ViewerContext } from './private-posts.service';
 
 export interface RequestUser {
@@ -68,7 +69,10 @@ export class PostsService {
         shareToken: options?.shareToken || null,
         unlockToken: options?.unlockToken || null,
       },
-      { allowConsumedViewSession: options?.allowConsumedViewSession ?? true },
+      {
+        allowConsumedViewSession: options?.allowConsumedViewSession ?? true,
+        allowPinUnlockToken: true,
+      },
     );
     return post;
   }
@@ -248,16 +252,17 @@ export class PostsService {
   }
 
   /**
-   * Fetch full post payload for editing — strictly verifies that the caller is the author.
+   * Fetch full post payload for editing — allowed for the post author or an Admin.
    */
-  async getPostForEdit(identifier: string, actorId: string) {
+  async getPostForEdit(identifier: string, actorId: string, userRole?: string) {
     const post = await this.privatePostsService.findPostForAuthCheck(identifier);
     if (!post) {
       throw new NotFoundException(`Story with identifier '${identifier}' not found.`);
     }
 
-    if (post.authorId !== actorId) {
-      throw new ForbiddenException('Only the post author can edit this blog.');
+    const isAdmin = String(userRole || '').toUpperCase() === Role.ADMIN;
+    if (post.authorId !== actorId && !isAdmin) {
+      throw new ForbiddenException('Only the post author or an Admin can edit this blog.');
     }
 
     let resolvedShareToken = post.shareToken;
@@ -273,6 +278,7 @@ export class PostsService {
       { ...post, shareToken: resolvedShareToken },
       {
         currentUserId: actorId,
+        currentUserRole: userRole,
         includeShareToken: true,
       },
     );
@@ -303,6 +309,9 @@ export class PostsService {
         author: { select: { id: true, name: true, username: true, avatar: true, bio: true } },
         category: true,
         tags: true,
+        privateAccesses: {
+          select: { id: true, status: true },
+        },
         comments: {
           include: {
             author: { select: { id: true, name: true, username: true, avatar: true } },
@@ -432,11 +441,12 @@ export class PostsService {
     });
   }
 
-  async updatePost(id: string, authorId: string, dto: any, userRole?: string) {
+  async updatePost(id: string, actorId: string, dto: any, userRole?: string) {
     const existing = await this.prisma.post.findUnique({ where: { id } });
     if (!existing) throw new NotFoundException('Post not found');
-    if (existing.authorId !== authorId) {
-      throw new ForbiddenException('Only the post author can update this post.');
+    const isAdmin = String(userRole || '').toUpperCase() === Role.ADMIN;
+    if (existing.authorId !== actorId && !isAdmin) {
+      throw new ForbiddenException('Only the post author or an Admin can update this post.');
     }
 
     const categoryId = await this.resolveCategoryId(dto.categoryId || existing.categoryId);
@@ -460,7 +470,7 @@ export class PostsService {
           ? PostVisibility.PUBLIC
           : existing.visibility;
 
-    if (visibility !== PostVisibility.PRIVATE && userRole === Role.READER) {
+    if (visibility !== PostVisibility.PRIVATE && userRole === Role.READER && !isAdmin) {
       throw new ForbiddenException('Only Writers or Admins can publish public stories.');
     }
 
@@ -550,19 +560,22 @@ export class PostsService {
         readingTimeMinutes,
         publishedAt: isPrivate
           ? null
-          : status === 'PUBLISHED' && !existing.publishedAt
-            ? new Date()
-            : existing.publishedAt,
+          : status === 'PUBLISHED'
+            ? existing.publishedAt || new Date()
+            : status === 'DRAFT'
+              ? null
+              : existing.publishedAt,
       },
       include: {
         author: { select: { id: true, name: true, username: true, avatar: true, bio: true } },
         category: true,
         tags: true,
+        privateAccesses: { select: { id: true, status: true } },
       },
     });
 
     return this.privatePostsService.sanitizePost(updated, {
-      currentUserId: authorId,
+      currentUserId: actorId,
       currentUserRole: userRole,
       includeShareToken: true,
     });
@@ -575,7 +588,7 @@ export class PostsService {
         ...viewer,
         userId: actorId,
       },
-      { allowConsumedViewSession: true },
+      { allowConsumedViewSession: true, allowPinUnlockToken: true },
     );
 
     if (post.authorId === actorId) {
@@ -636,6 +649,7 @@ export class PostsService {
 
     const { post } = await this.privatePostsService.assertUnlockedAccess(postId, viewer, {
       allowConsumedViewSession: true,
+      allowPinUnlockToken: true,
     });
 
     try {
@@ -675,22 +689,125 @@ export class PostsService {
     });
   }
 
-  async reviewPost(id: string, status: 'PUBLISHED' | 'NEEDS_REVISION' | 'REJECTED', feedback?: string) {
+  async reviewPost(
+    id: string,
+    status: 'PUBLISHED' | 'NEEDS_REVISION' | 'REJECTED' | 'DRAFT',
+    feedback?: string,
+    adminId?: string,
+    action?: string,
+  ) {
     const post = await this.prisma.post.findUnique({ where: { id } });
     if (!post) throw new NotFoundException('Post not found');
-    if (post.visibility === PostVisibility.PRIVATE && status === 'PUBLISHED') {
+
+    const isFlagImproper = action === 'FLAG_IMPROPER' || status === 'DRAFT';
+    const targetStatus = isFlagImproper ? PostStatus.DRAFT : (status as PostStatus);
+
+    if (post.visibility === PostVisibility.PRIVATE && targetStatus === PostStatus.PUBLISHED) {
       throw new BadRequestException('Private blogs cannot be published to the public feed.');
     }
 
     const updated = await this.prisma.post.update({
       where: { id },
       data: {
-        status: status as any,
-        reviewFeedback: feedback || null,
-        publishedAt: status === 'PUBLISHED' ? new Date() : post.publishedAt,
+        status: targetStatus as any,
+        reviewFeedback:
+          feedback?.trim() ||
+          (isFlagImproper
+            ? 'Flagged during editorial review as improper. Converted back to draft for revision.'
+            : null),
+        isFeatured: targetStatus === PostStatus.PUBLISHED ? post.isFeatured : false,
+        publishedAt:
+          targetStatus === PostStatus.PUBLISHED
+            ? post.publishedAt || new Date()
+            : isFlagImproper
+              ? null
+              : post.publishedAt,
+      },
+      include: {
+        author: { select: { id: true, name: true, username: true, avatar: true, bio: true } },
+        category: true,
+        tags: true,
+        privateAccesses: { select: { id: true, status: true } },
       },
     });
-    return this.privatePostsService.sanitizePost(updated, { currentUserRole: Role.ADMIN });
+
+    if (isFlagImproper && adminId && post.authorId) {
+      const reasonText =
+        feedback?.trim() ||
+        'Your published article was flagged during editorial review and converted back to Draft so you can edit and republish it.';
+      await this.notificationsService
+        .createNotification({
+          recipientId: post.authorId,
+          actorId: adminId,
+          type: 'EDITORIAL_FLAG',
+          postId: post.id,
+          message: reasonText,
+          allowSelf: true,
+        })
+        .catch(() => null);
+    }
+
+    return this.privatePostsService.sanitizePost(updated, {
+      currentUserId: adminId,
+      currentUserRole: Role.ADMIN,
+      includeShareToken: true,
+    });
+  }
+
+  async recordView(id: string, viewer: ViewerContext = {}, dto: RecordPostViewDto) {
+    const { post } = await this.privatePostsService.assertUnlockedAccess(id, viewer, {
+      allowConsumedViewSession: true,
+      allowPinUnlockToken: true,
+    });
+
+    const actualWordCount = Math.max(post.wordCount || 0, dto.wordCount || 0, 25);
+    const required2xMs = Math.max(4000, Math.round((actualWordCount / 500) * 60 * 1000));
+    const minAcceptedMs = Math.floor(required2xMs * 0.85);
+    const readDurationMs = Number(dto.readDurationMs || 0);
+
+    if (!dto.reachedBottom || readDurationMs < minAcceptedMs) {
+      return {
+        counted: false,
+        viewsCount: post.viewsCount ?? 0,
+        requiredReadMs: required2xMs,
+      };
+    }
+
+    const updated = await this.prisma.post.update({
+      where: { id: post.id },
+      data: { viewsCount: { increment: 1 } },
+      select: { id: true, viewsCount: true },
+    });
+
+    if (viewer.userId) {
+      const existingHistory = await this.prisma.readingHistory.findFirst({
+        where: { userId: viewer.userId, postId: post.id },
+      });
+      if (existingHistory) {
+        await this.prisma.readingHistory
+          .update({
+            where: { id: existingHistory.id },
+            data: { viewedAt: new Date() },
+          })
+          .catch(() => null);
+      } else {
+        await this.prisma.readingHistory
+          .create({
+            data: {
+              userId: viewer.userId,
+              postId: post.id,
+              viewedAt: new Date(),
+            },
+          })
+          .catch(() => null);
+      }
+    }
+
+    return {
+      counted: true,
+      viewsCount: updated.viewsCount,
+      requiredReadMs: required2xMs,
+    };
   }
 
   async verifySecretPassword(id: string, password: string): Promise<boolean> {
@@ -701,6 +818,7 @@ export class PostsService {
   }
 
   async saveDraft(authorId: string, dto: SaveDraftDto, userRole?: string) {
+    const isAdmin = String(userRole || '').toUpperCase() === Role.ADMIN;
     const rawTitle = dto.title?.trim();
     const rawSubtitle = dto.subtitle?.trim();
     const requestedVisibility =
@@ -711,7 +829,12 @@ export class PostsService {
           ? PostVisibility.PUBLIC
           : undefined);
 
-    if (requestedVisibility && requestedVisibility !== PostVisibility.PRIVATE && userRole === Role.READER) {
+    if (
+      requestedVisibility &&
+      requestedVisibility !== PostVisibility.PRIVATE &&
+      userRole === Role.READER &&
+      !isAdmin
+    ) {
       throw new ForbiddenException('Only Writers or Admins can create public stories.');
     }
 
@@ -725,12 +848,12 @@ export class PostsService {
       if (!existing) {
         throw new NotFoundException('Draft or story not found.');
       }
-      if (existing.authorId !== authorId) {
-        throw new ForbiddenException('Only the post author can edit this story.');
+      if (existing.authorId !== authorId && !isAdmin) {
+        throw new ForbiddenException('Only the post author or an Admin can edit this story.');
       }
 
       const targetVisibility = requestedVisibility || existing.visibility;
-      if (targetVisibility !== PostVisibility.PRIVATE && userRole === Role.READER) {
+      if (targetVisibility !== PostVisibility.PRIVATE && userRole === Role.READER && !isAdmin) {
         throw new ForbiddenException('Only Writers or Admins can create public stories.');
       }
 

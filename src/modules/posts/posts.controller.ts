@@ -20,6 +20,7 @@ import { CreatePostDto } from './dto/create-post.dto';
 import { SaveDraftDto } from './dto/save-draft.dto';
 import {
   GrantPrivateAccessDto,
+  RecordPostViewDto,
   UpdatePrivateAccessDto,
   UpdatePrivateSettingsDto,
   VerifyPrivatePasswordDto,
@@ -337,13 +338,14 @@ export class PostsController {
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
   @ApiOperation({
-    summary: 'Fetch full story data for editing (Author only; verifies authorId === currentUser.id)',
+    summary: 'Fetch full story data for editing (Author or Admin)',
   })
   async getPostForEdit(
     @Param('id') id: string,
     @CurrentUser('id') authorId: string,
+    @CurrentUser('role') userRole: string,
   ) {
-    return this.postsService.getPostForEdit(id, authorId);
+    return this.postsService.getPostForEdit(id, authorId, userRole);
   }
 
   @Public()
@@ -464,14 +466,38 @@ export class PostsController {
   @ApiBearerAuth()
   @ApiOperation({
     summary:
-      'Admin review action: Approve, Request Revisions with feedback notes, or Reject (Admin only)',
+      'Admin review action: Approve, Request Revisions, Flag as Improper (convert to DRAFT + notify), or Reject (Admin only)',
   })
   async reviewPost(
     @Param('id') id: string,
-    @Body('status') status: 'PUBLISHED' | 'NEEDS_REVISION' | 'REJECTED',
+    @CurrentUser('id') adminId: string,
+    @Body('status') status: 'PUBLISHED' | 'NEEDS_REVISION' | 'REJECTED' | 'DRAFT',
     @Body('feedback') feedback?: string,
+    @Body('action') action?: string,
   ) {
-    return this.postsService.reviewPost(id, status, feedback);
+    return this.postsService.reviewPost(id, status, feedback, adminId, action);
+  }
+
+  @Public()
+  @UseGuards(OptionalJwtAuthGuard)
+  @Post(':id/view')
+  @ApiOperation({
+    summary:
+      'Record a verified read view after top-to-bottom 2x-speed reading completion (guests & logged-in users)',
+  })
+  async recordView(
+    @Param('id') id: string,
+    @Body() dto: RecordPostViewDto,
+    @Headers('x-share-token') shareTokenHeader?: string,
+    @Headers('x-private-unlock-token') unlockTokenHeader?: string,
+    @CurrentUser() currentUser?: any,
+    @Req() req?: any,
+  ) {
+    return this.postsService.recordView(
+      id,
+      this.buildViewerContext(currentUser, shareTokenHeader, unlockTokenHeader, req),
+      dto,
+    );
   }
 
   @Public()

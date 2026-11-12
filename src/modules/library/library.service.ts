@@ -210,19 +210,6 @@ export class LibraryService {
         { unlockToken, allowConsumedViewSession: true },
       );
 
-    // Super admin views should not be counted as reads
-    const isSuperAdmin = role?.toUpperCase() === 'ADMIN';
-    if (!isSuperAdmin) {
-      try {
-        await this.prisma.post.update({
-          where: { id: postId },
-          data: { viewsCount: { increment: 1 } },
-        });
-      } catch (e) {
-        // Ignore error if post ID doesn't match objectid
-      }
-    }
-
     const existing = await this.prisma.readingHistory.findFirst({
       where: { userId, postId },
     });
