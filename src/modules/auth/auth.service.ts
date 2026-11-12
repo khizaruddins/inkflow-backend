@@ -11,6 +11,7 @@ import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../common/database/prisma.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
+import { UpdateProfileDto } from './dto/update-profile.dto';
 import { Role } from '@prisma/client';
 
 @Injectable()
@@ -173,6 +174,75 @@ export class AuthService implements OnModuleInit {
     }
 
     const { masterPrivatePassword, ...userWithoutPassword } = user;
+    return userWithoutPassword;
+  }
+
+  async updateProfile(userId: string, dto: UpdateProfileDto) {
+    const existingUser = await this.prisma.user.findUnique({
+      where: { id: userId },
+    });
+
+    if (!existingUser) {
+      throw new NotFoundException('User not found.');
+    }
+
+    const updateData: {
+      name?: string;
+      username?: string;
+      avatar?: string;
+      bio?: string;
+    } = {};
+
+    if (dto.name !== undefined) {
+      const trimmedName = dto.name.trim();
+      if (!trimmedName) {
+        throw new BadRequestException('Display name cannot be empty.');
+      }
+      updateData.name = trimmedName;
+    }
+
+    if (dto.username !== undefined) {
+      const cleanUsername = dto.username.trim().replace(/^@+/, '');
+      if (cleanUsername.length < 2) {
+        throw new BadRequestException('Username must be at least 2 characters long.');
+      }
+      if (!/^[a-zA-Z0-9_.-]+$/.test(cleanUsername)) {
+        throw new BadRequestException(
+          'Username can only contain letters, numbers, underscores, dots, and hyphens.',
+        );
+      }
+
+      const conflict = await this.prisma.user.findFirst({
+        where: {
+          username: { equals: cleanUsername, mode: 'insensitive' },
+          NOT: { id: userId },
+        },
+      });
+      if (conflict) {
+        throw new ConflictException('Username is already taken.');
+      }
+      updateData.username = cleanUsername;
+    }
+
+    if (dto.avatar !== undefined) {
+      const trimmedAvatar = dto.avatar.trim();
+      updateData.avatar =
+        trimmedAvatar ||
+        `https://ui-avatars.com/api/?name=${encodeURIComponent(
+          updateData.name || existingUser.name,
+        )}&background=random`;
+    }
+
+    if (dto.bio !== undefined) {
+      updateData.bio = dto.bio;
+    }
+
+    const updatedUser = await this.prisma.user.update({
+      where: { id: userId },
+      data: updateData,
+    });
+
+    const { masterPrivatePassword, ...userWithoutPassword } = updatedUser;
     return userWithoutPassword;
   }
 

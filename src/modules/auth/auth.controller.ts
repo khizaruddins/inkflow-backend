@@ -1,9 +1,10 @@
-import { Controller, Post, Body, Res, Get, UseGuards, Req, Param, Query } from '@nestjs/common';
+import { Controller, Post, Body, Res, Get, Patch, Put, UseGuards, Req, Param, Query } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import { Request, Response } from 'express';
 import { AuthService } from './auth.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
+import { UpdateProfileDto } from './dto/update-profile.dto';
 import { Public } from '../../common/decorators/public.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
@@ -103,6 +104,30 @@ export class AuthController {
   @ApiOperation({ summary: 'Get current authenticated user full profile' })
   async me(@CurrentUser('id') userId: string) {
     return this.authService.getUserMe(userId);
+  }
+
+  @Patch('profile')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Update current authenticated user profile' })
+  @ApiResponse({ status: 200, description: 'User profile successfully updated.' })
+  async updateProfilePatch(
+    @CurrentUser('id') userId: string,
+    @Body() dto: UpdateProfileDto,
+  ) {
+    return this.authService.updateProfile(userId, dto);
+  }
+
+  @Put('profile')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Update current authenticated user profile via PUT' })
+  @ApiResponse({ status: 200, description: 'User profile successfully updated.' })
+  async updateProfilePut(
+    @CurrentUser('id') userId: string,
+    @Body() dto: UpdateProfileDto,
+  ) {
+    return this.authService.updateProfile(userId, dto);
   }
 
   @Get('users/search')
