@@ -107,7 +107,7 @@ export class NotificationsService {
       actorIds.length > 0
         ? this.prisma.user.findMany({
             where: { id: { in: actorIds } },
-            select: { id: true, name: true, avatar: true, username: true },
+            select: { id: true, name: true, avatar: true, username: true, role: true },
           })
         : [],
       postIds.length > 0
@@ -204,6 +204,7 @@ export class NotificationsService {
             ? 'publish'
             : typeLower,
         actorName: displayActorName,
+        actorRole: actor?.role || undefined,
         actorAvatar:
           actor?.avatar ||
           `https://ui-avatars.com/api/?name=${encodeURIComponent(displayActorName)}&background=random`,

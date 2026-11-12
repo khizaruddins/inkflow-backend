@@ -493,7 +493,7 @@ export class PrivatePostsService {
     return this.prisma.post.findFirst({
       where,
       include: {
-        author: { select: { id: true, name: true, username: true, avatar: true, bio: true } },
+        author: { select: { id: true, name: true, username: true, avatar: true, bio: true, role: true } },
         category: true,
         tags: true,
         privateAccesses: {
@@ -501,9 +501,9 @@ export class PrivatePostsService {
         },
         comments: {
           include: {
-            author: { select: { id: true, name: true, username: true, avatar: true } },
+            author: { select: { id: true, name: true, username: true, avatar: true, role: true } },
             replies: {
-              include: { author: { select: { id: true, name: true, username: true, avatar: true } } },
+              include: { author: { select: { id: true, name: true, username: true, avatar: true, role: true } } },
             },
           },
           orderBy: { createdAt: 'desc' },
@@ -672,6 +672,7 @@ export class PrivatePostsService {
           username: record.user.username,
           avatar: record.user.avatar,
           bio: record.user.bio,
+          role: record.user.role,
         }
       : null;
 
@@ -720,6 +721,7 @@ export class PrivatePostsService {
               username: true,
               avatar: true,
               bio: true,
+              role: true,
               followingUserIds: true,
             },
           },
@@ -740,6 +742,7 @@ export class PrivatePostsService {
           username: true,
           avatar: true,
           bio: true,
+          role: true,
           followersCount: true,
           followingCount: true,
         },
@@ -815,6 +818,7 @@ export class PrivatePostsService {
           username: true,
           avatar: true,
           bio: true,
+          role: true,
           followersCount: true,
           followingCount: true,
         },
@@ -944,6 +948,7 @@ export class PrivatePostsService {
               username: true,
               avatar: true,
               bio: true,
+              role: true,
               followingUserIds: true,
             },
           },
@@ -1136,6 +1141,7 @@ export class PrivatePostsService {
             username: true,
             avatar: true,
             bio: true,
+            role: true,
             followingUserIds: true,
           },
         },
@@ -1214,6 +1220,7 @@ export class PrivatePostsService {
               username: true,
               avatar: true,
               bio: true,
+              role: true,
               followingUserIds: true,
             },
           },
@@ -1271,7 +1278,7 @@ export class PrivatePostsService {
         visibility: PostVisibility.PRIVATE,
       },
       include: {
-        author: { select: { id: true, name: true, username: true, avatar: true, bio: true } },
+        author: { select: { id: true, name: true, username: true, avatar: true, bio: true, role: true } },
         category: true,
         tags: true,
         privateAccesses: {
@@ -1299,7 +1306,7 @@ export class PrivatePostsService {
         include: {
           post: {
             include: {
-              author: { select: { id: true, name: true, username: true, avatar: true, bio: true } },
+              author: { select: { id: true, name: true, username: true, avatar: true, bio: true, role: true } },
               category: true,
               tags: true,
             },
@@ -1375,7 +1382,7 @@ export class PrivatePostsService {
         visibility: PostVisibility.PRIVATE,
       },
       include: {
-        author: { select: { id: true, name: true, username: true, avatar: true, bio: true } },
+        author: { select: { id: true, name: true, username: true, avatar: true, bio: true, role: true } },
         category: true,
         tags: true,
         privateAccesses: {

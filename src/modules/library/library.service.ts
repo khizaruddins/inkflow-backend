@@ -84,7 +84,7 @@ export class LibraryService {
       include: {
         post: {
           include: {
-            author: { select: { id: true, name: true, username: true, avatar: true } },
+            author: { select: { id: true, name: true, username: true, avatar: true, role: true } },
           },
         },
       },
@@ -134,7 +134,7 @@ export class LibraryService {
             coverImage: true,
             visibility: true,
             authorId: true,
-            author: { select: { id: true, name: true, avatar: true } },
+            author: { select: { id: true, name: true, avatar: true, role: true } },
           },
         },
       },
@@ -184,7 +184,7 @@ export class LibraryService {
       include: {
         post: {
           include: {
-            author: { select: { id: true, name: true, avatar: true } },
+            author: { select: { id: true, name: true, avatar: true, role: true } },
           },
         },
       },

@@ -10,7 +10,7 @@ export class ReportsService {
       include: {
         comment: {
           include: {
-            author: { select: { id: true, name: true, username: true, avatar: true } },
+            author: { select: { id: true, name: true, username: true, avatar: true, role: true } },
           },
         },
         reporter: { select: { id: true, name: true, username: true } },

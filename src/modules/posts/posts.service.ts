@@ -202,7 +202,7 @@ export class PostsService {
     const posts = await this.prisma.post.findMany({
       where,
       include: {
-        author: { select: { id: true, name: true, username: true, avatar: true, bio: true } },
+        author: { select: { id: true, name: true, username: true, avatar: true, bio: true, role: true } },
         category: true,
         tags: true,
       },
@@ -306,7 +306,7 @@ export class PostsService {
         visibility: PostVisibility.PRIVATE,
       },
       include: {
-        author: { select: { id: true, name: true, username: true, avatar: true, bio: true } },
+        author: { select: { id: true, name: true, username: true, avatar: true, bio: true, role: true } },
         category: true,
         tags: true,
         privateAccesses: {
@@ -314,9 +314,9 @@ export class PostsService {
         },
         comments: {
           include: {
-            author: { select: { id: true, name: true, username: true, avatar: true } },
+            author: { select: { id: true, name: true, username: true, avatar: true, role: true } },
             replies: {
-              include: { author: { select: { id: true, name: true, username: true, avatar: true } } },
+              include: { author: { select: { id: true, name: true, username: true, avatar: true, role: true } } },
             },
           },
           orderBy: { createdAt: 'desc' },
@@ -428,7 +428,7 @@ export class PostsService {
         publishedAt: !isPrivate && status === PostStatus.PUBLISHED ? new Date() : null,
       },
       include: {
-        author: { select: { id: true, name: true, username: true, avatar: true, bio: true } },
+        author: { select: { id: true, name: true, username: true, avatar: true, bio: true, role: true } },
         category: true,
         tags: true,
       },
@@ -567,7 +567,7 @@ export class PostsService {
               : existing.publishedAt,
       },
       include: {
-        author: { select: { id: true, name: true, username: true, avatar: true, bio: true } },
+        author: { select: { id: true, name: true, username: true, avatar: true, bio: true, role: true } },
         category: true,
         tags: true,
         privateAccesses: { select: { id: true, status: true } },
@@ -656,7 +656,7 @@ export class PostsService {
       const claps = await (this.prisma as any).postClap.findMany({
         where: { postId: post.id },
         include: {
-          user: { select: { id: true, name: true, username: true, avatar: true } },
+          user: { select: { id: true, name: true, username: true, avatar: true, role: true } },
         },
         orderBy: { count: 'desc' },
       });
@@ -724,7 +724,7 @@ export class PostsService {
               : post.publishedAt,
       },
       include: {
-        author: { select: { id: true, name: true, username: true, avatar: true, bio: true } },
+        author: { select: { id: true, name: true, username: true, avatar: true, bio: true, role: true } },
         category: true,
         tags: true,
         privateAccesses: { select: { id: true, status: true } },
@@ -934,7 +934,7 @@ export class PostsService {
           readingTimeMinutes,
         },
         include: {
-          author: { select: { id: true, name: true, username: true, avatar: true, bio: true } },
+          author: { select: { id: true, name: true, username: true, avatar: true, bio: true, role: true } },
           category: true,
           tags: true,
         },
@@ -1004,7 +1004,7 @@ export class PostsService {
         readingTimeMinutes,
       },
       include: {
-        author: { select: { id: true, name: true, username: true, avatar: true, bio: true } },
+        author: { select: { id: true, name: true, username: true, avatar: true, bio: true, role: true } },
         category: true,
         tags: true,
       },
