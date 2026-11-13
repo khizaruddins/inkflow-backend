@@ -171,7 +171,7 @@ export class CollabGateway implements OnGatewayConnection, OnGatewayDisconnect {
         user.role,
       );
 
-      if (!access.canEdit && !access.isAuthor && !access.isAdmin) {
+      if (!access.canEdit && !access.isAuthor && !access.isAdmin && !access.isCollaborator) {
         return client.emit('error', { message: 'You do not have access to this story room' });
       }
 

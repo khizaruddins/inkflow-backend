@@ -9,6 +9,7 @@ import { PrismaService } from '../../common/database/prisma.service';
 import { Role, CollabMode, CollabSuggestionStatus, NotificationType } from '@prisma/client';
 import {
   InviteCollabDto,
+  UpdateCollabPermissionDto,
   CreateSuggestionDto,
   ReviewSuggestionDto,
 } from './dto/collab.dto';
@@ -155,6 +156,22 @@ export class CollabService {
       throw new BadRequestException('You are already the author of this story.');
     }
 
+    const isReader = String(targetUser.role || '').toUpperCase() === Role.READER;
+    let requestedCanEdit = true;
+    if (dto.permission) {
+      requestedCanEdit = dto.permission.toUpperCase() === 'EDIT';
+    } else if (typeof dto.canEdit === 'boolean') {
+      requestedCanEdit = dto.canEdit;
+    }
+
+    if (isReader && requestedCanEdit) {
+      throw new BadRequestException(
+        'Members with READER role cannot be granted write/edit access. Only WRITER or ADMIN members can edit stories. You can grant this member View access.',
+      );
+    }
+
+    const finalCanEdit = isReader ? false : requestedCanEdit;
+
     const collaborator = await this.prisma.postCollaborator.upsert({
       where: {
         postId_userId: {
@@ -163,12 +180,12 @@ export class CollabService {
         },
       },
       update: {
-        canEdit: dto.canEdit ?? true,
+        canEdit: finalCanEdit,
       },
       create: {
         postId: post.id,
         userId: targetUser.id,
-        canEdit: dto.canEdit ?? true,
+        canEdit: finalCanEdit,
         invitedById: actorId,
       },
       include: {
@@ -191,12 +208,83 @@ export class CollabService {
           actorId,
           postId: post.id,
           type: NotificationType.PRIVATE_SHARE,
-          message: `${inviter?.name || 'Someone'} invited you to co-author "${post.title || 'Untitled'}" in real-time.`,
+          message: `${inviter?.name || 'Someone'} invited you to ${finalCanEdit ? 'co-author' : 'view'} "${post.title || 'Untitled'}" in real-time.`,
         },
       });
     } catch (_) {}
 
     return collaborator;
+  }
+
+  async updateCollaboratorPermission(
+    postId: string,
+    actorId: string,
+    userRole: string | undefined,
+    targetUserId: string,
+    dto: UpdateCollabPermissionDto,
+  ) {
+    const { post, isAuthor, isAdmin } = await this.verifyPostAccess(
+      postId,
+      actorId,
+      userRole,
+    );
+
+    if (!isAuthor && !isAdmin) {
+      throw new ForbiddenException('Only the story author or an Admin can manage collaborator permissions.');
+    }
+
+    const existing = await this.prisma.postCollaborator.findUnique({
+      where: {
+        postId_userId: {
+          postId: post.id,
+          userId: targetUserId,
+        },
+      },
+      include: {
+        user: {
+          select: { id: true, name: true, username: true, role: true, avatar: true },
+        },
+      },
+    });
+
+    if (!existing) {
+      throw new NotFoundException('Collaborator not found for this story.');
+    }
+
+    let newCanEdit = true;
+    if (dto.permission) {
+      newCanEdit = dto.permission.toUpperCase() === 'EDIT';
+    } else if (typeof dto.canEdit === 'boolean') {
+      newCanEdit = dto.canEdit;
+    }
+
+    const isReader = String(existing.user.role || '').toUpperCase() === Role.READER;
+    if (isReader && newCanEdit) {
+      throw new BadRequestException(
+        'Members with READER role cannot be granted write/edit access. Upgrading to WRITER is required.',
+      );
+    }
+
+    const finalCanEdit = isReader ? false : newCanEdit;
+
+    const updated = await this.prisma.postCollaborator.update({
+      where: {
+        postId_userId: {
+          postId: post.id,
+          userId: targetUserId,
+        },
+      },
+      data: {
+        canEdit: finalCanEdit,
+      },
+      include: {
+        user: {
+          select: { id: true, name: true, username: true, avatar: true, role: true },
+        },
+      },
+    });
+
+    return updated;
   }
 
   async removeCollaborator(
@@ -263,6 +351,25 @@ export class CollabService {
     }
 
     if (post.authorId !== userId) {
+      const joiningUser = await this.prisma.user.findUnique({
+        where: { id: userId },
+        select: { id: true, role: true },
+      });
+
+      const isReader = String(joiningUser?.role || '').toUpperCase() === Role.READER;
+
+      const existingCollab = await this.prisma.postCollaborator.findUnique({
+        where: {
+          postId_userId: {
+            postId: post.id,
+            userId,
+          },
+        },
+      });
+
+      // Readers can ONLY have canEdit: false. Writers / Admins get canEdit: true (or keep existing if already configured)
+      const allowedCanEdit = isReader ? false : (existingCollab ? existingCollab.canEdit : true);
+
       await this.prisma.postCollaborator.upsert({
         where: {
           postId_userId: {
@@ -271,12 +378,12 @@ export class CollabService {
           },
         },
         update: {
-          canEdit: true,
+          canEdit: allowedCanEdit,
         },
         create: {
           postId: post.id,
           userId,
-          canEdit: true,
+          canEdit: allowedCanEdit,
           invitedById: post.authorId,
         },
       });

@@ -23,10 +23,27 @@ export class InviteCollabDto {
   @IsOptional()
   canEdit?: boolean;
 
+  @ApiPropertyOptional({ enum: ['VIEW', 'EDIT'], description: 'Collaboration permission: VIEW or EDIT', default: 'EDIT' })
+  @IsString()
+  @IsOptional()
+  permission?: 'VIEW' | 'EDIT';
+
   @ApiPropertyOptional({ description: 'Regenerate public collaboration link' })
   @IsBoolean()
   @IsOptional()
   regenerateToken?: boolean;
+}
+
+export class UpdateCollabPermissionDto {
+  @ApiPropertyOptional({ description: 'Whether the collaborator can edit directly' })
+  @IsBoolean()
+  @IsOptional()
+  canEdit?: boolean;
+
+  @ApiPropertyOptional({ enum: ['VIEW', 'EDIT'], description: 'Collaboration permission: VIEW or EDIT' })
+  @IsString()
+  @IsOptional()
+  permission?: 'VIEW' | 'EDIT';
 }
 
 export class SetCollabModeDto {

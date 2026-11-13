@@ -262,16 +262,18 @@ export class PostsService {
 
     const isAdmin = String(userRole || '').toUpperCase() === Role.ADMIN;
     let isCollaborator = false;
+    let collabCanEdit = false;
     if (post.authorId !== actorId && !isAdmin) {
       const collab = await this.prisma.postCollaborator.findUnique({
         where: { postId_userId: { postId: post.id, userId: actorId } },
       });
-      if (collab && collab.canEdit) {
+      if (collab) {
         isCollaborator = true;
+        collabCanEdit = Boolean(collab.canEdit);
       }
     }
     if (post.authorId !== actorId && !isAdmin && !isCollaborator) {
-      throw new ForbiddenException('Only the post author, an Admin, or an invited Collaborator can edit this story.');
+      throw new ForbiddenException('Only the post author, an Admin, or an invited collaborator can access this story.');
     }
 
     let resolvedShareToken = post.shareToken;
@@ -300,7 +302,7 @@ export class PostsService {
       allowLinkPasswordAccess: post.allowLinkPasswordAccess ?? true,
       requirePasswordForGrantedUsers: post.requirePasswordForGrantedUsers ?? false,
       requireFollowerToView: post.requireFollowerToView ?? false,
-      canEdit: true,
+      canEdit: post.authorId === actorId || isAdmin || collabCanEdit,
     };
   }
 

@@ -13,6 +13,7 @@ import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { CollabService } from './collab.service';
 import {
   InviteCollabDto,
+  UpdateCollabPermissionDto,
   SetCollabModeDto,
   CreateSuggestionDto,
   ReviewSuggestionDto,
@@ -58,6 +59,24 @@ export class CollabController {
     @CurrentUser('role') userRole: string,
   ) {
     return this.collabService.removeCollaborator(postId, actorId, userRole, targetUserId);
+  }
+
+  @Patch(':id/collab/collaborators/:userId/permission')
+  @ApiOperation({ summary: 'Update a collaborator permission (VIEW or EDIT)' })
+  async updateCollaboratorPermission(
+    @Param('id') postId: string,
+    @Param('userId') targetUserId: string,
+    @CurrentUser('id') actorId: string,
+    @CurrentUser('role') userRole: string,
+    @Body() dto: UpdateCollabPermissionDto,
+  ) {
+    return this.collabService.updateCollaboratorPermission(
+      postId,
+      actorId,
+      userRole,
+      targetUserId,
+      dto,
+    );
   }
 
   @Post(':id/collab/regenerate-token')
