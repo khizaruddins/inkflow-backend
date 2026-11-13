@@ -43,7 +43,7 @@ export class NotificationsService {
       }),
       this.prisma.user.findUnique({
         where: { id: userId },
-        select: { followingUserIds: true },
+        select: { followingUserIds: true, role: true },
       }),
     ]);
 
@@ -144,6 +144,7 @@ export class NotificationsService {
 
     const visibleNotifs = rawNotifs.filter((n) => {
       if (!n.postId) return true;
+      if (currentUser?.role === 'ADMIN') return true;
       const post = postMap.get(n.postId);
       if (!post) return true;
       if (post.visibility !== PostVisibility.PRIVATE) return true;
@@ -163,10 +164,21 @@ export class NotificationsService {
       const isEditorialFlag = (n.type as string) === 'EDITORIAL_FLAG';
 
       if (isEditorialFlag) {
-        displayActorName = actor?.name || 'Editorial Team';
-        metaText = n.message
-          ? `flagged your story as improper and moved it to Draft ("${n.message}"):`
-          : 'flagged your story as improper and moved it to Draft so you can edit and republish:';
+        const msg = n.message || '';
+        if (msg.includes('Story Reported')) {
+          metaText = 'reported a story for moderation:';
+        } else if (msg.includes('Comment Reported')) {
+          metaText = 'reported a comment:';
+        } else if (msg.includes('Deletion Request')) {
+          metaText = 'requested account termination:';
+        } else if (msg.includes('Creator Application')) {
+          metaText = 'submitted a creator application:';
+        } else {
+          displayActorName = actor?.name || 'Editorial Team';
+          metaText = n.message
+            ? `flagged your story as improper and moved it to Draft ("${n.message}"):`
+            : 'flagged your story as improper and moved it to Draft so you can edit and republish:';
+        }
       } else if (n.type === 'CLAP') {
         metaText = 'clapped for';
       } else if (n.type === 'RESPONSE') {

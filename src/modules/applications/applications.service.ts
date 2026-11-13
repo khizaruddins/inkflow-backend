@@ -1,5 +1,6 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
 import { PrismaService } from '../../common/database/prisma.service';
+import { NotificationType } from '@prisma/client';
 
 export interface CreateApplicationDto {
   sampleTitle: string;
@@ -9,6 +10,8 @@ export interface CreateApplicationDto {
 
 @Injectable()
 export class ApplicationsService {
+  private readonly logger = new Logger(ApplicationsService.name);
+
   constructor(private prisma: PrismaService) {}
 
   async create(userId: string, dto: CreateApplicationDto) {
@@ -20,7 +23,7 @@ export class ApplicationsService {
       throw new BadRequestException('You already have a pending application under review.');
     }
 
-    return this.prisma.creatorApplication.create({
+    const application = await this.prisma.creatorApplication.create({
       data: {
         userId,
         sampleTitle: dto.sampleTitle,
@@ -40,6 +43,29 @@ export class ApplicationsService {
         },
       },
     });
+
+    // Notify all platform admins
+    try {
+      const admins = await this.prisma.user.findMany({
+        where: { role: 'ADMIN' },
+        select: { id: true },
+      });
+      if (admins.length > 0) {
+        await this.prisma.notification.createMany({
+          data: admins.map((admin) => ({
+            recipientId: admin.id,
+            actorId: userId,
+            type: NotificationType.EDITORIAL_FLAG,
+            message: `✍️ Creator Application: "${dto.sampleTitle}" submitted by ${application.user?.name || 'Reader'} for writer review.`,
+            read: false,
+          })),
+        });
+      }
+    } catch (err) {
+      this.logger.error('Failed to notify admins of creator application', err);
+    }
+
+    return application;
   }
 
   async findByUserId(userId: string) {

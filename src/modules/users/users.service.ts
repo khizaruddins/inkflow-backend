@@ -6,7 +6,7 @@ import {
   Logger,
 } from '@nestjs/common';
 import { PrismaService } from '../../common/database/prisma.service';
-import { Role, UserStatus, DeletionRequestStatus } from '@prisma/client';
+import { Role, UserStatus, DeletionRequestStatus, NotificationType } from '@prisma/client';
 
 @Injectable()
 export class UsersService {
@@ -146,6 +146,27 @@ export class UsersService {
         deletionScheduledAt: scheduledFor,
       },
     });
+
+    // Notify all platform admins
+    try {
+      const admins = await this.prisma.user.findMany({
+        where: { role: 'ADMIN' },
+        select: { id: true },
+      });
+      if (admins.length > 0) {
+        await this.prisma.notification.createMany({
+          data: admins.map((admin) => ({
+            recipientId: admin.id,
+            actorId: userId,
+            type: NotificationType.EDITORIAL_FLAG,
+            message: `⚠️ Deletion Request: ${user.name} (@${user.username}) requested account termination (30-day grace period).`,
+            read: false,
+          })),
+        });
+      }
+    } catch (err) {
+      this.logger.error('Failed to notify admins of account deletion request', err);
+    }
 
     const { masterPrivatePassword, ...userWithoutPassword } = updated;
     return {

@@ -89,6 +89,28 @@ export class ReportsService {
       },
     });
 
+    // Notify all platform admins
+    try {
+      const admins = await this.prisma.user.findMany({
+        where: { role: 'ADMIN' },
+        select: { id: true },
+      });
+      if (admins.length > 0) {
+        await this.prisma.notification.createMany({
+          data: admins.map((admin) => ({
+            recipientId: admin.id,
+            actorId: reporterId,
+            postId,
+            type: NotificationType.EDITORIAL_FLAG,
+            message: `🚩 Story Reported: "${post.title}" was reported for ${parsedReason}. Review in Content Moderation.`,
+            read: false,
+          })),
+        });
+      }
+    } catch (err) {
+      this.logger.error('Failed to notify admins of story report', err);
+    }
+
     return {
       success: true,
       message: 'Report submitted successfully. InkFlow admin team will evaluate this story.',
