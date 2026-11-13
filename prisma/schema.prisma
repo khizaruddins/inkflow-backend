@@ -77,6 +77,32 @@ enum CollabSuggestionStatus {
   REJECTED
 }
 
+enum UserStatus {
+  ACTIVE
+  PAUSED
+  SUSPENDED
+  PENDING_DELETION
+}
+
+enum DeletionRequestStatus {
+  PENDING
+  CANCELLED
+  COMPLETED
+}
+
+enum PostReportReason {
+  ABUSIVE
+  INAPPROPRIATE
+  FALSE_CLAIM
+  OTHER
+}
+
+enum PostReportStatus {
+  PENDING
+  RESOLVED
+  DISMISSED
+}
+
 // ------------------------------------------------------
 // MODELS
 // ------------------------------------------------------
@@ -89,6 +115,12 @@ model User {
   avatar               String
   bio                  String?
   role                 Role                 @default(READER)
+  status               UserStatus           @default(ACTIVE)
+  pausedAt             DateTime?
+  suspendedAt          DateTime?
+  suspensionReason     String?
+  deletionRequestedAt  DateTime?
+  deletionScheduledAt  DateTime?
   masterPrivatePassword String?              // Encrypted password set by user for private stories
   
   followersCount       Int                  @default(0)
@@ -109,6 +141,8 @@ model User {
   grantedPrivateAccesses  PrivatePostAccess[]  @relation("PrivateAccessGrantor")
   collaborations          PostCollaborator[]   @relation("UserPostCollaborations")
   collabSuggestions       PostSuggestion[]     @relation("UserPostSuggestions")
+  deletionRequests        AccountDeletionRequest[]
+  postReports             PostReport[]         @relation("PostReporter")
 
   createdAt            DateTime             @default(now())
   updatedAt            DateTime             @updatedAt
@@ -195,6 +229,7 @@ model Post {
   privateAccesses    PrivatePostAccess[]
   collaborators      PostCollaborator[]
   suggestions        PostSuggestion[]
+  postReports        PostReport[]
 
   collabMode         CollabMode?         @default(FREE_FLOW)
   collabInviteToken  String?
@@ -389,6 +424,39 @@ model PostSuggestion {
   reviewedById     String?                @db.ObjectId
   createdAt        DateTime               @default(now())
   updatedAt        DateTime               @updatedAt
+
+  @@index([postId, status])
+}
+
+model AccountDeletionRequest {
+  id           String                 @id @default(auto()) @map("_id") @db.ObjectId
+  userId       String                 @db.ObjectId
+  user         User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userEmail    String
+  userName     String
+  status       DeletionRequestStatus  @default(PENDING)
+  requestedAt  DateTime               @default(now())
+  scheduledFor DateTime               // requestedAt + 30 days
+  completedAt  DateTime?
+  cancelledAt  DateTime?
+  createdAt    DateTime               @default(now())
+  updatedAt    DateTime               @updatedAt
+
+  @@index([status, scheduledFor])
+}
+
+model PostReport {
+  id          String            @id @default(auto()) @map("_id") @db.ObjectId
+  postId      String            @db.ObjectId
+  post        Post              @relation(fields: [postId], references: [id], onDelete: Cascade)
+  reporterId  String            @db.ObjectId
+  reporter    User              @relation("PostReporter", fields: [reporterId], references: [id])
+  reason      PostReportReason
+  customNote  String?
+  adminNote   String?
+  status      PostReportStatus  @default(PENDING)
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
 
   @@index([postId, status])
 }

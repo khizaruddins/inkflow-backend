@@ -31,6 +31,7 @@ import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { OptionalJwtAuthGuard } from '../auth/guards/optional-jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
+import { ReportsService } from '../reports/reports.service';
 
 @ApiTags('Posts')
 @Controller('posts')
@@ -38,6 +39,7 @@ export class PostsController {
   constructor(
     private postsService: PostsService,
     private privatePostsService: PrivatePostsService,
+    private reportsService: ReportsService,
   ) {}
 
   private buildViewerContext(
@@ -541,6 +543,23 @@ export class PostsController {
       this.buildViewerContext(currentUser, dto.shareToken || shareTokenHeader, undefined, req),
       dto,
       { throwOnInvalidPassword: false },
+    );
+  }
+
+  @Post(':id/report')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Submit a report for an article / blog story' })
+  async reportPost(
+    @Param('id') postId: string,
+    @CurrentUser('id') reporterId: string,
+    @Body() body: { reason: string; customNote?: string },
+  ) {
+    return this.reportsService.createPostReport(
+      postId,
+      reporterId,
+      body?.reason || 'OTHER',
+      body?.customNote,
     );
   }
 }

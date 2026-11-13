@@ -13,6 +13,7 @@ import { NotificationsModule } from './modules/notifications/notifications.modul
 import { CategoriesModule } from './modules/categories/categories.module';
 import { UnsplashModule } from './modules/unsplash/unsplash.module';
 import { CollabModule } from './modules/collab/collab.module';
+import { UsersModule } from './modules/users/users.module';
 
 @Module({
   imports: [
@@ -22,6 +23,7 @@ import { CollabModule } from './modules/collab/collab.module';
     }),
     PrismaModule,
     AuthModule,
+    UsersModule,
     PostsModule,
     CommentsModule,
     ReportsModule,

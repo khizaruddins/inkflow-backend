@@ -380,8 +380,8 @@ export class PostsService {
             ? PostVisibility.PRIVATE
             : PostVisibility.PUBLIC);
 
-    if (visibility !== PostVisibility.PRIVATE && userRole === Role.READER) {
-      throw new ForbiddenException('Only Writers or Admins can publish public stories.');
+    if (userRole === Role.READER) {
+      throw new ForbiddenException('Readers cannot create or write blogs (including private blogs). Please apply to become a writer.');
     }
 
     const isPrivate = visibility === PostVisibility.PRIVATE;
@@ -870,13 +870,8 @@ export class PostsService {
           ? PostVisibility.PUBLIC
           : undefined);
 
-    if (
-      requestedVisibility &&
-      requestedVisibility !== PostVisibility.PRIVATE &&
-      userRole === Role.READER &&
-      !isAdmin
-    ) {
-      throw new ForbiddenException('Only Writers or Admins can create public stories.');
+    if (userRole === Role.READER && !isAdmin) {
+      throw new ForbiddenException('Readers cannot create or save blogs (including private blogs). Please apply to become a writer.');
     }
 
     const rawCover = dto.coverImage?.trim();
