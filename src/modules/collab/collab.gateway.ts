@@ -13,6 +13,7 @@ import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../common/database/prisma.service';
 import { CollabService } from './collab.service';
+import { PostEncryptionService } from '../posts/post-encryption.service';
 import { CollabMode, Role } from '@prisma/client';
 
 export interface CollabUser {
@@ -62,6 +63,7 @@ export class CollabGateway implements OnGatewayConnection, OnGatewayDisconnect {
     private collabService: CollabService,
     private jwtService: JwtService,
     private configService: ConfigService,
+    private postEncryptionService: PostEncryptionService,
   ) {}
 
   private extractToken(client: Socket): string | null {
@@ -219,7 +221,7 @@ export class CollabGateway implements OnGatewayConnection, OnGatewayDisconnect {
         post: {
           title: access.post.title,
           subtitle: access.post.subtitle,
-          content: access.post.content,
+          content: this.postEncryptionService.decrypt(access.post.content, access.post.id),
         },
         pendingSuggestionsCount,
       });
@@ -319,10 +321,19 @@ export class CollabGateway implements OnGatewayConnection, OnGatewayDisconnect {
             .filter(Boolean).length;
           const readingTimeMinutes = Math.max(1, Math.ceil(wordCount / 200));
 
+          const postMeta = await this.prisma.post.findUnique({
+            where: { id: data.postId },
+            select: { visibility: true },
+          });
+          const isPrivate = postMeta?.visibility === 'PRIVATE';
+          const finalContent = isPrivate
+            ? this.postEncryptionService.encrypt(data.content, data.postId)
+            : data.content;
+
           await this.prisma.post.update({
             where: { id: data.postId },
             data: {
-              content: data.content,
+              content: finalContent,
               ...(data.title !== undefined ? { title: data.title } : {}),
               ...(data.subtitle !== undefined ? { subtitle: data.subtitle } : {}),
               wordCount,

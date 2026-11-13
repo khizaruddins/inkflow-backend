@@ -17,6 +17,7 @@ import {
   Role,
 } from '@prisma/client';
 import { PrismaService } from '../../common/database/prisma.service';
+import { PostEncryptionService } from './post-encryption.service';
 import {
   GrantPrivateAccessDto,
   UpdatePrivateAccessDto,
@@ -53,6 +54,7 @@ export class PrivatePostsService {
     private prisma: PrismaService,
     private jwtService: JwtService,
     private configService: ConfigService,
+    private postEncryptionService: PostEncryptionService,
   ) {}
 
   generateShareToken(): string {
@@ -128,6 +130,7 @@ export class PrivatePostsService {
       currentUserId?: string | null;
       currentUserRole?: string | null;
       includeShareToken?: boolean;
+      decryptContent?: boolean;
     },
   ) {
     if (!post) return post;
@@ -145,8 +148,19 @@ export class PrivatePostsService {
           ? PrivateLockType.PASSWORD
           : PrivateLockType.NONE;
 
+    let resolvedContent = rest.content;
+    if (post.visibility === PostVisibility.PRIVATE && rest.content !== undefined) {
+      if (options?.decryptContent) {
+        resolvedContent = this.postEncryptionService.decrypt(rest.content, post.id);
+      } else if (this.postEncryptionService.isEncrypted(rest.content)) {
+        // Redact encrypted ciphertext in list/unverified views
+        resolvedContent = '';
+      }
+    }
+
     return {
       ...rest,
+      content: resolvedContent,
       ...(includeShareToken && post.visibility === PostVisibility.PRIVATE
         ? { shareToken: shareToken || null }
         : {}),
@@ -567,6 +581,7 @@ export class PrivatePostsService {
           currentUserId: viewer.userId,
           currentUserRole: viewer.userRole,
           includeShareToken: true,
+          decryptContent: true,
         }),
       };
     }
@@ -645,6 +660,7 @@ export class PrivatePostsService {
         currentUserId: viewer.userId,
         currentUserRole: viewer.userRole,
         includeShareToken: evaluation.isAuthorOrAdmin,
+        decryptContent: true,
       }),
     };
   }

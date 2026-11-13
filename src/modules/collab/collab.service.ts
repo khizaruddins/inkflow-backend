@@ -15,12 +15,14 @@ import {
   BroadcastCollabEventDto,
 } from './dto/collab.dto';
 import { PusherService } from './pusher.service';
+import { PostEncryptionService } from '../posts/post-encryption.service';
 
 @Injectable()
 export class CollabService {
   constructor(
     private prisma: PrismaService,
     private pusherService: PusherService,
+    private postEncryptionService: PostEncryptionService,
   ) {}
 
   generateCollabToken(): string {
@@ -99,7 +101,7 @@ export class CollabService {
       postId: post.id,
       title: post.title,
       subtitle: post.subtitle,
-      content: post.content,
+      content: this.postEncryptionService.decrypt(post.content, post.id),
       collabMode: post.collabMode || CollabMode.FREE_FLOW,
       collabInviteToken: inviteToken,
       isAuthor: isAuthor || isAdmin,
@@ -552,11 +554,16 @@ export class CollabService {
         .filter(Boolean).length;
       const readingTimeMinutes = Math.max(1, Math.ceil(wordCount / 200));
 
+      const isPrivate = post.visibility === 'PRIVATE';
+      const finalContent = isPrivate
+        ? this.postEncryptionService.encrypt(suggestion.suggestedContent, post.id)
+        : suggestion.suggestedContent;
+
       // 1. Update post with merged content
       await this.prisma.post.update({
         where: { id: post.id },
         data: {
-          content: suggestion.suggestedContent,
+          content: finalContent,
           title: suggestion.title || post.title,
           wordCount,
           readingTimeMinutes,

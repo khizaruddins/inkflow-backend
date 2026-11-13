@@ -6,6 +6,7 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import * as bcrypt from 'bcrypt';
+import * as crypto from 'crypto';
 import { Role, PostStatus, PostVisibility, PrivateLockType, CollabMode } from '@prisma/client';
 import { PrismaService } from '../../common/database/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -13,6 +14,7 @@ import { CreatePostDto } from './dto/create-post.dto';
 import { SaveDraftDto } from './dto/save-draft.dto';
 import { RecordPostViewDto } from './dto/private-post.dto';
 import { PrivatePostsService, ViewerContext } from './private-posts.service';
+import { PostEncryptionService } from './post-encryption.service';
 
 export interface RequestUser {
   id?: string;
@@ -50,6 +52,7 @@ export class PostsService {
     private prisma: PrismaService,
     private notificationsService: NotificationsService,
     private privatePostsService: PrivatePostsService,
+    private postEncryptionService: PostEncryptionService,
   ) {}
 
   async assertCanAccessPostById(
@@ -248,6 +251,7 @@ export class PostsService {
     return this.privatePostsService.sanitizePost(post, {
       currentUserId: viewer.userId,
       currentUserRole: viewer.userRole,
+      decryptContent: true,
     });
   }
 
@@ -285,19 +289,22 @@ export class PostsService {
       });
     }
 
+    const decryptedContent = this.postEncryptionService.decrypt(post.content, post.id);
+
     const sanitized = this.privatePostsService.sanitizePost(
-      { ...post, shareToken: resolvedShareToken },
+      { ...post, shareToken: resolvedShareToken, content: decryptedContent },
       {
         currentUserId: actorId,
         currentUserRole: userRole,
         includeShareToken: true,
+        decryptContent: true,
       },
     );
 
     return {
       ...sanitized,
       subtitle: post.subtitle ?? '',
-      content: post.content ?? '',
+      content: decryptedContent,
       privateLockType: post.privateLockType ?? PrivateLockType.NONE,
       allowLinkPasswordAccess: post.allowLinkPasswordAccess ?? true,
       requirePasswordForGrantedUsers: post.requirePasswordForGrantedUsers ?? false,
@@ -413,14 +420,19 @@ export class PostsService {
     }
 
     const status = dto.status || PostStatus.PUBLISHED;
+    const postId = crypto.randomBytes(12).toString('hex');
+    const finalContent = isPrivate
+      ? this.postEncryptionService.encrypt(dto.content, postId)
+      : dto.content;
 
     const created = await this.prisma.post.create({
       data: {
+        id: postId,
         title: dto.title,
         subtitle: dto.subtitle,
         slug,
         excerpt: dto.excerpt,
-        content: dto.content,
+        content: finalContent,
         coverImage,
         authorId,
         categoryId,
@@ -449,6 +461,7 @@ export class PostsService {
       currentUserId: authorId,
       currentUserRole: userRole,
       includeShareToken: true,
+      decryptContent: true,
     });
   }
 
@@ -551,6 +564,10 @@ export class PostsService {
         : existing.shareToken || this.privatePostsService.generateShareToken()
       : existing.shareToken;
 
+    const finalContent = isPrivate
+      ? this.postEncryptionService.encrypt(content, id)
+      : this.postEncryptionService.decrypt(content, id);
+
     const updated = await this.prisma.post.update({
       where: { id },
       data: {
@@ -561,7 +578,7 @@ export class PostsService {
           dto.excerpt !== undefined && String(dto.excerpt).trim() !== ''
             ? dto.excerpt
             : existing.excerpt,
-        content,
+        content: finalContent,
         coverImage,
         categoryId,
         tagIds: dto.tagIds || existing.tagIds,
@@ -601,6 +618,7 @@ export class PostsService {
       currentUserId: actorId,
       currentUserRole: userRole,
       includeShareToken: true,
+      decryptContent: true,
     });
   }
 
@@ -941,13 +959,17 @@ export class PostsService {
         ? existing.shareToken || this.privatePostsService.generateShareToken()
         : existing.shareToken;
 
+      const finalContent = isPrivate
+        ? this.postEncryptionService.encrypt(resolvedContent, postId)
+        : this.postEncryptionService.decrypt(resolvedContent, postId);
+
       const updatedDraft = await this.prisma.post.update({
         where: { id: postId },
         data: {
           title: resolvedTitle,
           subtitle: resolvedSubtitle,
           excerpt: resolvedExcerpt,
-          content: resolvedContent,
+          content: finalContent,
           coverImage: finalCover,
           categoryId,
           tagIds: dto.tagIds || existing.tagIds,
@@ -979,6 +1001,7 @@ export class PostsService {
         currentUserId: authorId,
         currentUserRole: userRole,
         includeShareToken: true,
+        decryptContent: true,
       });
     }
 
@@ -1016,13 +1039,19 @@ export class PostsService {
       newDraftCover = rawCover;
     }
 
+    const newPostId = crypto.randomBytes(12).toString('hex');
+    const finalContent = isPrivate
+      ? this.postEncryptionService.encrypt(content, newPostId)
+      : content;
+
     const createdDraft = await this.prisma.post.create({
       data: {
+        id: newPostId,
         title,
         subtitle,
         slug,
         excerpt,
-        content,
+        content: finalContent,
         coverImage: newDraftCover,
         authorId,
         categoryId,
@@ -1049,6 +1078,7 @@ export class PostsService {
       currentUserId: authorId,
       currentUserRole: userRole,
       includeShareToken: true,
+      decryptContent: true,
     });
   }
 
