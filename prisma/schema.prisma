@@ -119,6 +119,7 @@ model User {
   pausedAt             DateTime?
   suspendedAt          DateTime?
   suspensionReason     String?
+  suspendedUntil       DateTime?
   deletionRequestedAt  DateTime?
   deletionScheduledAt  DateTime?
   masterPrivatePassword String?              // Encrypted password set by user for private stories

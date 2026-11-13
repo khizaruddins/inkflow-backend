@@ -81,8 +81,9 @@ export class UsersController {
   async suspendUser(
     @Param('id') id: string,
     @Body('reason') reason?: string,
+    @Body('durationDays') durationDays?: number,
   ) {
-    return this.usersService.suspendUser(id, reason);
+    return this.usersService.suspendUser(id, reason, durationDays);
   }
 
   @Patch('admin/:id/unsuspend')

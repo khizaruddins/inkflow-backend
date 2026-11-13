@@ -30,6 +30,7 @@ export class UsersService {
         status: true,
         pausedAt: true,
         suspendedAt: true,
+        suspendedUntil: true,
         suspensionReason: true,
         deletionRequestedAt: true,
         deletionScheduledAt: true,
@@ -45,10 +46,22 @@ export class UsersService {
       orderBy: { createdAt: 'desc' },
     });
 
-    return users.map((u) => ({
-      ...u,
-      articlesCount: u._count.posts,
-    }));
+    const now = new Date();
+    return users.map((u) => {
+      let daysToUnsuspend: number | null = null;
+      if (u.status === UserStatus.SUSPENDED) {
+        const suspendedDate = u.suspendedAt ? new Date(u.suspendedAt) : now;
+        const unsuspendDate = (u as any).suspendedUntil
+          ? new Date((u as any).suspendedUntil)
+          : new Date(suspendedDate.getTime() + 14 * 24 * 60 * 60 * 1000);
+        daysToUnsuspend = Math.max(1, Math.ceil((unsuspendDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24)));
+      }
+      return {
+        ...u,
+        articlesCount: u._count.posts,
+        daysToUnsuspend,
+      };
+    });
   }
 
   /**
@@ -247,7 +260,7 @@ export class UsersService {
   /**
    * Suspend a user account (Admin only).
    */
-  async suspendUser(targetUserId: string, reason?: string) {
+  async suspendUser(targetUserId: string, reason?: string, durationDays: number = 14) {
     const user = await this.prisma.user.findUnique({ where: { id: targetUserId } });
     if (!user) throw new NotFoundException('User not found.');
 
@@ -255,11 +268,16 @@ export class UsersService {
       throw new ForbiddenException('Administrators cannot be suspended.');
     }
 
+    const now = new Date();
+    const days = Number(durationDays) > 0 ? Number(durationDays) : 14;
+    const suspendedUntil = new Date(now.getTime() + days * 24 * 60 * 60 * 1000);
+
     const updated = await this.prisma.user.update({
       where: { id: targetUserId },
       data: {
         status: UserStatus.SUSPENDED,
-        suspendedAt: new Date(),
+        suspendedAt: now,
+        suspendedUntil,
         suspensionReason: reason || 'Violation of InkFlow Community Guidelines',
       },
     });
@@ -267,8 +285,11 @@ export class UsersService {
     const { masterPrivatePassword, ...userWithoutPassword } = updated;
     return {
       success: true,
-      message: `User ${user.name} (@${user.username}) has been suspended.`,
-      user: userWithoutPassword,
+      message: `User ${user.name} (@${user.username}) has been suspended for ${days} days.`,
+      user: {
+        ...userWithoutPassword,
+        daysToUnsuspend: days,
+      },
     };
   }
 
@@ -284,6 +305,7 @@ export class UsersService {
       data: {
         status: UserStatus.ACTIVE,
         suspendedAt: null,
+        suspendedUntil: null,
         suspensionReason: null,
       },
     });

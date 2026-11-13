@@ -1,6 +1,7 @@
 import {
   Injectable,
   UnauthorizedException,
+  ForbiddenException,
   ConflictException,
   BadRequestException,
   NotFoundException,
@@ -12,7 +13,7 @@ import { PrismaService } from '../../common/database/prisma.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
-import { Role } from '@prisma/client';
+import { Role, UserStatus } from '@prisma/client';
 
 @Injectable()
 export class AuthService implements OnModuleInit {
@@ -115,6 +116,26 @@ export class AuthService implements OnModuleInit {
       throw new UnauthorizedException('Invalid credentials.');
     }
 
+    if (user.status === UserStatus.SUSPENDED) {
+      const now = new Date();
+      const suspendedDate = user.suspendedAt ? new Date(user.suspendedAt) : now;
+      const unsuspendDate = (user as any).suspendedUntil
+        ? new Date((user as any).suspendedUntil)
+        : new Date(suspendedDate.getTime() + 14 * 24 * 60 * 60 * 1000);
+      const diffMs = unsuspendDate.getTime() - now.getTime();
+      const daysLeft = Math.max(1, Math.ceil(diffMs / (1000 * 60 * 60 * 24)));
+
+      throw new ForbiddenException({
+        statusCode: 403,
+        error: 'ACCOUNT_SUSPENDED',
+        message: `Your account has been suspended by an administrator. Reason: "${user.suspensionReason || 'Violation of community guidelines'}". Days remaining until unsuspend: ${daysLeft} day${daysLeft === 1 ? '' : 's'}.`,
+        daysLeft,
+        suspendedAt: user.suspendedAt,
+        suspensionReason: user.suspensionReason,
+        unsuspendDate: unsuspendDate.toISOString(),
+      });
+    }
+
     const tokens = this.generateTokens(user);
     const { masterPrivatePassword, ...userWithoutPassword } = user;
     return { user: userWithoutPassword, tokens };
@@ -174,7 +195,25 @@ export class AuthService implements OnModuleInit {
     }
 
     const { masterPrivatePassword, ...userWithoutPassword } = user;
-    return userWithoutPassword;
+    let daysToUnsuspend: number | null = null;
+    let computedSuspendedUntil: string | null = null;
+
+    if (user.status === UserStatus.SUSPENDED) {
+      const now = new Date();
+      const suspendedDate = user.suspendedAt ? new Date(user.suspendedAt) : now;
+      const unsuspendDate = (user as any).suspendedUntil
+        ? new Date((user as any).suspendedUntil)
+        : new Date(suspendedDate.getTime() + 14 * 24 * 60 * 60 * 1000);
+      const diffMs = unsuspendDate.getTime() - now.getTime();
+      daysToUnsuspend = Math.max(1, Math.ceil(diffMs / (1000 * 60 * 60 * 24)));
+      computedSuspendedUntil = unsuspendDate.toISOString();
+    }
+
+    return {
+      ...userWithoutPassword,
+      suspendedUntil: (user as any).suspendedUntil ? (user as any).suspendedUntil.toISOString() : computedSuspendedUntil,
+      daysToUnsuspend,
+    };
   }
 
   async updateProfile(userId: string, dto: UpdateProfileDto) {
