@@ -91,6 +91,7 @@ export class NotificationsService {
                 recipientId: userId,
                 actorId: fId,
                 type: 'FOLLOW',
+                message: 'you started following',
                 read: false,
               },
             });
@@ -188,11 +189,22 @@ export class NotificationsService {
       } else if ((n.type as string) === 'PRIVATE_SHARE') {
         metaText = 'shared a private story with you:';
       } else if (n.type === 'FOLLOW') {
-        if (!n.postId && currentUser?.followingUserIds?.includes(n.actorId)) {
-          displayActorName = `You started following ${actor?.name || 'writer'}`;
-          metaText = '';
+        const isOutgoing =
+          n.message === 'you started following' ||
+          (!n.message &&
+            !n.postId &&
+            currentUser?.followingUserIds?.some((id) => String(id) === String(n.actorId)));
+
+        if (isOutgoing) {
+          displayActorName = 'You';
+          metaText = 'started following';
+          title = actor?.name || 'Writer';
+          slug = actor?.username || actor?.id;
         } else {
+          displayActorName = actor?.name || 'A user';
           metaText = 'started following you';
+          title = undefined;
+          slug = actor?.username || actor?.id;
         }
       }
 
@@ -219,8 +231,8 @@ export class NotificationsService {
         actorRole: actor?.role || undefined,
         actorAvatar:
           actor?.avatar ||
-          `https://ui-avatars.com/api/?name=${encodeURIComponent(displayActorName)}&background=random`,
-        targetId: post?.id || n.postId || undefined,
+          `https://ui-avatars.com/api/?name=${encodeURIComponent(actor?.name || displayActorName)}&background=random`,
+        targetId: post?.id || n.postId || (n.type === 'FOLLOW' ? actor?.id : undefined),
         targetTitle: title,
         targetSlug: slug,
         targetStatus: post?.status,

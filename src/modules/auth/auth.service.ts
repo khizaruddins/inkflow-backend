@@ -500,6 +500,7 @@ export class AuthService implements OnModuleInit {
             recipientId: targetUserId,
             actorId: currentUserId,
             type: 'FOLLOW',
+            message: 'started following you',
           },
         });
       } catch (e) {
@@ -513,6 +514,7 @@ export class AuthService implements OnModuleInit {
             recipientId: currentUserId,
             actorId: targetUserId,
             type: 'FOLLOW',
+            message: 'you started following',
           },
         });
       } catch (e) {
