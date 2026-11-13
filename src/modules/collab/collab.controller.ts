@@ -17,6 +17,7 @@ import {
   SetCollabModeDto,
   CreateSuggestionDto,
   ReviewSuggestionDto,
+  BroadcastCollabEventDto,
 } from './dto/collab.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
@@ -146,5 +147,16 @@ export class CollabController {
       userRole,
       dto,
     );
+  }
+
+  @Post(':id/collab/event')
+  @ApiOperation({ summary: 'Broadcast real-time editor events (content change, typing) to collaborators' })
+  async broadcastEvent(
+    @Param('id') postId: string,
+    @CurrentUser('id') userId: string,
+    @CurrentUser('role') userRole: string,
+    @Body() dto: BroadcastCollabEventDto,
+  ) {
+    return this.collabService.broadcastEvent(postId, userId, userRole, dto);
   }
 }

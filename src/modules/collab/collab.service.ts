@@ -12,11 +12,16 @@ import {
   UpdateCollabPermissionDto,
   CreateSuggestionDto,
   ReviewSuggestionDto,
+  BroadcastCollabEventDto,
 } from './dto/collab.dto';
+import { PusherService } from './pusher.service';
 
 @Injectable()
 export class CollabService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private pusherService: PusherService,
+  ) {}
 
   generateCollabToken(): string {
     return `collab_${crypto.randomBytes(12).toString('hex')}`;
@@ -425,6 +430,8 @@ export class CollabService {
       },
     });
 
+    await this.pusherService.trigger(`post-${postId}`, 'mode-change', { mode });
+
     return updated;
   }
 
@@ -488,6 +495,15 @@ export class CollabService {
         });
       } catch (_) {}
     }
+
+    const pendingSuggestionsCount = await this.prisma.postSuggestion.count({
+      where: { postId: post.id, status: CollabSuggestionStatus.PENDING },
+    });
+
+    await this.pusherService.trigger(`post-${postId}`, 'new-suggestion', {
+      suggestion,
+      pendingSuggestionsCount,
+    });
 
     return suggestion;
   }
@@ -585,6 +601,19 @@ export class CollabService {
         });
       } catch (_) {}
 
+      const pendingCount = await this.prisma.postSuggestion.count({
+        where: { postId: post.id, status: CollabSuggestionStatus.PENDING },
+      });
+
+      await this.pusherService.trigger(`post-${postId}`, 'suggestion-reviewed', {
+        suggestionId,
+        action: 'APPROVE',
+        reviewNote: dto.reviewNote,
+        reviewedBy: reviewer?.name,
+        pendingSuggestionsCount: pendingCount,
+        mergedContent: suggestion.suggestedContent,
+      });
+
       return {
         suggestion: updatedSuggestion,
         mergedContent: suggestion.suggestedContent,
@@ -617,10 +646,66 @@ export class CollabService {
         });
       } catch (_) {}
 
+      const pendingCount = await this.prisma.postSuggestion.count({
+        where: { postId: post.id, status: CollabSuggestionStatus.PENDING },
+      });
+
+      await this.pusherService.trigger(`post-${postId}`, 'suggestion-reviewed', {
+        suggestionId,
+        action: 'REJECT',
+        reviewNote: dto.reviewNote,
+        reviewedBy: reviewer?.name,
+        pendingSuggestionsCount: pendingCount,
+      });
+
       return {
         suggestion: updatedSuggestion,
         action: 'REJECTED',
       };
     }
+  }
+
+  async broadcastEvent(
+    postId: string,
+    userId: string,
+    userRole: string | undefined,
+    dto: BroadcastCollabEventDto,
+  ) {
+    const { canEdit } = await this.verifyPostAccess(postId, userId, userRole);
+    if (!canEdit) {
+      throw new ForbiddenException('You do not have write access to this story.');
+    }
+
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true, name: true, avatar: true },
+    });
+
+    const eventName = dto.event;
+    const rawData = dto.data || {};
+
+    let payload: any = {
+      ...rawData,
+      userId,
+      userName: user?.name || 'Collaborator',
+      timestamp: new Date().toISOString(),
+    };
+
+    // Free Tier Guard: Pusher message payload limit is 10 KB.
+    // If payload stringified length > 8192 bytes, emit sync_required notification instead of full payload.
+    const jsonStr = JSON.stringify(payload);
+    if (jsonStr.length > 8192) {
+      payload = {
+        type: 'sync_required',
+        userId,
+        userName: user?.name || 'Collaborator',
+        timestamp: new Date().toISOString(),
+      };
+    }
+
+    const channel = `post-${postId}`;
+    await this.pusherService.trigger(channel, eventName, payload);
+
+    return { success: true };
   }
 }

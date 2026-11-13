@@ -82,3 +82,12 @@ export class ReviewSuggestionDto {
   @IsOptional()
   reviewNote?: string;
 }
+
+export class BroadcastCollabEventDto {
+  @ApiProperty({ description: 'Event name (e.g. content-change, user-typing)' })
+  @IsString()
+  event: string;
+
+  @ApiProperty({ description: 'Event payload data' })
+  data: any;
+}
