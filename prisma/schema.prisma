@@ -66,6 +66,17 @@ enum PrivateAccessStatus {
   REVOKED
 }
 
+enum CollabMode {
+  FREE_FLOW
+  APPROVAL_REQUIRED
+}
+
+enum CollabSuggestionStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
 // ------------------------------------------------------
 // MODELS
 // ------------------------------------------------------
@@ -96,6 +107,8 @@ model User {
   postClaps               PostClap[]
   privateAccesses         PrivatePostAccess[]  @relation("PrivateAccessRecipient")
   grantedPrivateAccesses  PrivatePostAccess[]  @relation("PrivateAccessGrantor")
+  collaborations          PostCollaborator[]   @relation("UserPostCollaborations")
+  collabSuggestions       PostSuggestion[]     @relation("UserPostSuggestions")
 
   createdAt            DateTime             @default(now())
   updatedAt            DateTime             @updatedAt
@@ -180,6 +193,11 @@ model Post {
   history            ReadingHistory[]
   postClaps          PostClap[]
   privateAccesses    PrivatePostAccess[]
+  collaborators      PostCollaborator[]
+  suggestions        PostSuggestion[]
+
+  collabMode         CollabMode?         @default(FREE_FLOW)
+  collabInviteToken  String?
 
   publishedAt        DateTime?
   scheduledAt        DateTime?
@@ -187,6 +205,7 @@ model Post {
   updatedAt          DateTime         @updatedAt
 
   @@index([shareToken])
+  @@index([collabInviteToken])
 }
 
 model PrivatePostAccess {
@@ -337,4 +356,39 @@ model PostClap {
   updatedAt DateTime @updatedAt
 
   @@unique([postId, userId])
+}
+
+model PostCollaborator {
+  id           String    @id @default(auto()) @map("_id") @db.ObjectId
+  postId       String    @db.ObjectId
+  post         Post      @relation(fields: [postId], references: [id], onDelete: Cascade)
+  userId       String    @db.ObjectId
+  user         User      @relation("UserPostCollaborations", fields: [userId], references: [id], onDelete: Cascade)
+  canEdit      Boolean   @default(true)
+  invitedById  String    @db.ObjectId
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@unique([postId, userId])
+  @@index([userId])
+}
+
+model PostSuggestion {
+  id               String                 @id @default(auto()) @map("_id") @db.ObjectId
+  postId           String                 @db.ObjectId
+  post             Post                   @relation(fields: [postId], references: [id], onDelete: Cascade)
+  userId           String                 @db.ObjectId
+  user             User                   @relation("UserPostSuggestions", fields: [userId], references: [id], onDelete: Cascade)
+  title            String?
+  originalContent  String
+  suggestedContent String
+  diffSummary      String?
+  status           CollabSuggestionStatus @default(PENDING)
+  reviewNote       String?
+  reviewedAt       DateTime?
+  reviewedById     String?                @db.ObjectId
+  createdAt        DateTime               @default(now())
+  updatedAt        DateTime               @updatedAt
+
+  @@index([postId, status])
 }

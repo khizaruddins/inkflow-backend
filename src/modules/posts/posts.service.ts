@@ -6,7 +6,7 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import * as bcrypt from 'bcrypt';
-import { Role, PostStatus, PostVisibility, PrivateLockType } from '@prisma/client';
+import { Role, PostStatus, PostVisibility, PrivateLockType, CollabMode } from '@prisma/client';
 import { PrismaService } from '../../common/database/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { CreatePostDto } from './dto/create-post.dto';
@@ -261,8 +261,17 @@ export class PostsService {
     }
 
     const isAdmin = String(userRole || '').toUpperCase() === Role.ADMIN;
+    let isCollaborator = false;
     if (post.authorId !== actorId && !isAdmin) {
-      throw new ForbiddenException('Only the post author or an Admin can edit this blog.');
+      const collab = await this.prisma.postCollaborator.findUnique({
+        where: { postId_userId: { postId: post.id, userId: actorId } },
+      });
+      if (collab && collab.canEdit) {
+        isCollaborator = true;
+      }
+    }
+    if (post.authorId !== actorId && !isAdmin && !isCollaborator) {
+      throw new ForbiddenException('Only the post author, an Admin, or an invited Collaborator can edit this story.');
     }
 
     let resolvedShareToken = post.shareToken;
@@ -445,8 +454,20 @@ export class PostsService {
     const existing = await this.prisma.post.findUnique({ where: { id } });
     if (!existing) throw new NotFoundException('Post not found');
     const isAdmin = String(userRole || '').toUpperCase() === Role.ADMIN;
+    let isCollaborator = false;
     if (existing.authorId !== actorId && !isAdmin) {
-      throw new ForbiddenException('Only the post author or an Admin can update this post.');
+      const collab = await this.prisma.postCollaborator.findUnique({
+        where: { postId_userId: { postId: existing.id, userId: actorId } },
+      });
+      if (collab && collab.canEdit) {
+        isCollaborator = true;
+      }
+    }
+    if (existing.authorId !== actorId && !isAdmin && !isCollaborator) {
+      throw new ForbiddenException('Only the post author, an Admin, or an invited collaborator can update this post.');
+    }
+    if (isCollaborator && !isAdmin && existing.authorId !== actorId && existing.collabMode === CollabMode.APPROVAL_REQUIRED) {
+      throw new ForbiddenException('This story requires author approval for collaborator changes. Please submit a revision suggestion.');
     }
 
     const categoryId = await this.resolveCategoryId(dto.categoryId || existing.categoryId);
@@ -848,8 +869,20 @@ export class PostsService {
       if (!existing) {
         throw new NotFoundException('Draft or story not found.');
       }
+      let isCollaborator = false;
       if (existing.authorId !== authorId && !isAdmin) {
-        throw new ForbiddenException('Only the post author or an Admin can edit this story.');
+        const collab = await this.prisma.postCollaborator.findUnique({
+          where: { postId_userId: { postId: existing.id, userId: authorId } },
+        });
+        if (collab && collab.canEdit) {
+          isCollaborator = true;
+        }
+      }
+      if (existing.authorId !== authorId && !isAdmin && !isCollaborator) {
+        throw new ForbiddenException('Only the post author, an Admin, or an invited collaborator can edit this story.');
+      }
+      if (isCollaborator && !isAdmin && existing.authorId !== authorId && existing.collabMode === CollabMode.APPROVAL_REQUIRED) {
+        throw new ForbiddenException('This story requires author approval for collaborator changes. Please submit a revision suggestion.');
       }
 
       const targetVisibility = requestedVisibility || existing.visibility;
