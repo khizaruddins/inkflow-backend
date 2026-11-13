@@ -88,6 +88,8 @@ export class BroadcastCollabEventDto {
   @IsString()
   event: string;
 
-  @ApiProperty({ description: 'Event payload data' })
-  data: any;
+  @ApiPropertyOptional({ description: 'Event payload data' })
+  @IsOptional()
+  data?: any;
 }
+
